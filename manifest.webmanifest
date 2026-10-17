@@ -4,6 +4,7 @@
   "start_url": "/player.html",
   "scope": "/",
   "display": "fullscreen",
+  "orientation": "landscape",
   "background_color": "#000000",
   "theme_color": "#000000"
 }

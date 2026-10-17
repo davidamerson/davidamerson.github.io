@@ -1,0 +1,22 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.kidsvideo.app.daughter",
+      "sha256_cert_fingerprints": [
+        "0E:91:E8:5E:00:C5:62:6A:99:50:B8:3C:7C:BB:C1:52:0D:79:AF:37:45:86:64:4C:95:64:B0:AD:12:AE:4A:D7"
+      ]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.kidsvideo.app.son",
+      "sha256_cert_fingerprints": [
+        "0E:91:E8:5E:00:C5:62:6A:99:50:B8:3C:7C:BB:C1:52:0D:79:AF:37:45:86:64:4C:95:64:B0:AD:12:AE:4A:D7"
+      ]
+    }
+  }
+]

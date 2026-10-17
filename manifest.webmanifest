@@ -1,0 +1,9 @@
+{
+  "name": "Kids Video Player",
+  "short_name": "Kids Video",
+  "start_url": "/player.html",
+  "scope": "/",
+  "display": "fullscreen",
+  "background_color": "#000000",
+  "theme_color": "#000000"
+}

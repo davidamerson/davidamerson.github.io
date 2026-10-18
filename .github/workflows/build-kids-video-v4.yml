@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-java@v5
         with:
@@ -34,6 +34,9 @@ jobs:
           echo "66a066565a28962631a4f730ea9ce5ce5cd4a12e72dac408fbea81bf155f734e  /tmp/kids-video-v4-source.tar.gz" | sha256sum -c -
           tar -xzf /tmp/kids-video-v4-source.tar.gz -C kids-video-v4
           test -f kids-video-v4/app/build.gradle
+          if ! grep -q "buildFeatures" kids-video-v4/app/build.gradle; then
+            sed -i '/compileSdk 36/a\    buildFeatures { buildConfig = true }' kids-video-v4/app/build.gradle
+          fi
 
       - name: Build Daughter and Son APKs
         working-directory: kids-video-v4
@@ -49,7 +52,7 @@ jobs:
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
           keytool -printcert -jarfile dist/Daughter-Video-v4.apk > dist/SIGNING-CERT-Daughter.txt
           keytool -printcert -jarfile dist/Son-Video-v4.apk > dist/SIGNING-CERT-Son.txt
-          cp /tmp/kids-video-v4-source.tar.gz dist/Kids-Video-v4-Source.tar.gz
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v4-Source.tar.gz -C kids-video-v4 .
 
       - uses: actions/upload-artifact@v4
         with:

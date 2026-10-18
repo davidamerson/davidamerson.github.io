@@ -1,4 +1,4 @@
-name: Build Kids Video v4 APKs
+name: Build Kids Video v4.1 APKs
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
     branches: [ "main" ]
     paths:
       - "kids-video-v4-parts/**"
+      - "v4.1-patches/**"
       - ".github/workflows/build-kids-video-v4.yml"
 
 jobs:
@@ -26,7 +27,7 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Restore and verify source tree
+      - name: Restore and patch source tree
         run: |
           rm -rf kids-video-v4
           mkdir -p kids-video-v4
@@ -37,6 +38,13 @@ jobs:
           if ! grep -q "buildFeatures" kids-video-v4/app/build.gradle; then
             sed -i '/compileSdk 36/a\    buildFeatures { buildConfig = true }' kids-video-v4/app/build.gradle
           fi
+          cd kids-video-v4
+          patch -p1 < ../v4.1-patches/a.patch
+          patch -p1 < ../v4.1-patches/b.patch
+          patch -p1 < ../v4.1-patches/c.patch
+          grep -q "versionName '4.1.0'" app/build.gradle
+          grep -q "Stories & Cartoons" app/src/main/java/com/kidsvideo/app/MainActivity.java
+          grep -q "bufferingWatchdog" app/src/main/java/com/kidsvideo/app/PlayerActivity.java
 
       - name: Build Daughter and Son APKs
         working-directory: kids-video-v4
@@ -45,18 +53,18 @@ jobs:
       - name: Package and verify outputs
         run: |
           mkdir -p dist
-          cp kids-video-v4/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v4.apk
-          cp kids-video-v4/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v4.apk
-          test -s dist/Daughter-Video-v4.apk
-          test -s dist/Son-Video-v4.apk
+          cp kids-video-v4/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v4.1.apk
+          cp kids-video-v4/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v4.1.apk
+          test -s dist/Daughter-Video-v4.1.apk
+          test -s dist/Son-Video-v4.1.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          keytool -printcert -jarfile dist/Daughter-Video-v4.apk > dist/SIGNING-CERT-Daughter.txt
-          keytool -printcert -jarfile dist/Son-Video-v4.apk > dist/SIGNING-CERT-Son.txt
-          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v4-Source.tar.gz -C kids-video-v4 .
+          keytool -printcert -jarfile dist/Daughter-Video-v4.1.apk > dist/SIGNING-CERT-Daughter.txt
+          keytool -printcert -jarfile dist/Son-Video-v4.1.apk > dist/SIGNING-CERT-Son.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v4.1-Source.tar.gz -C kids-video-v4 .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kids-video-v4-apks
+          name: kids-video-v4.1-apks
           path: dist/
           if-no-files-found: error
           retention-days: 30

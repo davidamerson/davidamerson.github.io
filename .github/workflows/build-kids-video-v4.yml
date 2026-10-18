@@ -1,4 +1,4 @@
-name: Build Kids Video v5 APKs
+name: Build Kids Video v6 APKs
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
     paths:
       - "kids-video-v4-parts/**"
       - "v4.1-patches/**"
-      - "v5-patches/**"
+      - "v6-patches/**"
       - ".github/workflows/build-kids-video-v4.yml"
 
 jobs:
@@ -48,13 +48,12 @@ jobs:
           patch -p1 < ../v4.1-patches/a.patch
           patch -p1 < ../v4.1-patches/b.patch
           patch -p1 < ../v4.1-patches/c.patch
-          patch -p1 < ../v5-patches/vpn-bypass.patch
-          sed -i "s/versionCode 40100/versionCode 50000/" app/build.gradle
-          sed -i "s/versionName '4.1.0'/versionName '5.0.0'/" app/build.gradle
-          grep -q "versionName '5.0.0'" app/build.gradle
+          patch -p1 < ../v6-patches/twa.patch
+          grep -q "versionName '6.0.0'" app/build.gradle
+          grep -q "androidbrowserhelper:2.7.4" app/build.gradle
+          grep -q "TwaPlaybackActivity" app/src/main/AndroidManifest.xml
+          grep -q "davidamerson.github.io" app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java
           grep -q "Stories & Cartoons" app/src/main/java/com/kidsvideo/app/MainActivity.java
-          grep -q "preparePlaybackNetwork" app/src/main/java/com/kidsvideo/app/PlayerActivity.java
-          grep -q "initializationWatchdog" app/src/main/java/com/kidsvideo/app/PlayerActivity.java
 
       - name: Build Daughter and Son APKs
         working-directory: kids-video-v4
@@ -63,18 +62,18 @@ jobs:
       - name: Package and verify outputs
         run: |
           mkdir -p dist
-          cp kids-video-v4/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v5.apk
-          cp kids-video-v4/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v5.apk
-          test -s dist/Daughter-Video-v5.apk
-          test -s dist/Son-Video-v5.apk
+          cp kids-video-v4/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v6.apk
+          cp kids-video-v4/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v6.apk
+          test -s dist/Daughter-Video-v6.apk
+          test -s dist/Son-Video-v6.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          keytool -printcert -jarfile dist/Daughter-Video-v5.apk > dist/SIGNING-CERT-Daughter.txt
-          keytool -printcert -jarfile dist/Son-Video-v5.apk > dist/SIGNING-CERT-Son.txt
-          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v5-Source.tar.gz -C kids-video-v4 .
+          keytool -printcert -jarfile dist/Daughter-Video-v6.apk > dist/SIGNING-CERT-Daughter.txt
+          keytool -printcert -jarfile dist/Son-Video-v6.apk > dist/SIGNING-CERT-Son.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v6-Source.tar.gz -C kids-video-v4 .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kids-video-v5-apks
+          name: kids-video-v6-apks
           path: dist/
           if-no-files-found: error
           retention-days: 30

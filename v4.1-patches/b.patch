@@ -1,0 +1,203 @@
+--- kidsv4src/app/src/main/java/com/kidsvideo/app/MainActivity.java	2026-10-18 00:00:00.000000000 +0000
++++ kidsv4work/app/src/main/java/com/kidsvideo/app/MainActivity.java	2026-10-18 16:16:20.101817211 +0000
+@@ -25,6 +25,7 @@
+ import android.widget.LinearLayout;
+ import android.widget.ProgressBar;
+ import android.widget.ScrollView;
++import android.widget.HorizontalScrollView;
+ import android.widget.Spinner;
+ import android.widget.ArrayAdapter;
+ import android.widget.TextView;
+@@ -55,6 +56,8 @@
+     private ProgressBar progress;
+     private final ArrayList<Models.VideoItem> allVideos = new ArrayList<>();
+     private String mode = "home";
++    private String selectedCategory = "Recommended";
++    private LinearLayout categoryRow;
+     private final ExecutorService network = Executors.newSingleThreadExecutor();
+     private TextToSpeech tts;
+     private Models.VideoItem lastPlayed;
+@@ -114,9 +117,9 @@
+         Button fav = button("★ Favourites");
+         Button hist = button("History");
+         Button refresh = button("↻");
+-        home.setOnClickListener(v -> { mode = "home"; applyFilter(); });
+-        fav.setOnClickListener(v -> { mode = "favourites"; applyFilter(); });
+-        hist.setOnClickListener(v -> { mode = "history"; applyFilter(); });
++        home.setOnClickListener(v -> { mode = "home"; selectedCategory = "Recommended"; applyFilter(); refreshCategoryStyles(); });
++        fav.setOnClickListener(v -> { mode = "favourites"; applyFilter(); refreshCategoryStyles(); });
++        hist.setOnClickListener(v -> { mode = "history"; applyFilter(); refreshCategoryStyles(); });
+         refresh.setOnClickListener(v -> refreshCatalog(true));
+         controls.addView(home);
+         controls.addView(fav);
+@@ -124,6 +127,29 @@
+         if (tv) controls.addView(refresh);
+         root.addView(controls);
+ 
++        HorizontalScrollView categoryScroll = new HorizontalScrollView(this);
++        categoryScroll.setHorizontalScrollBarEnabled(false);
++        categoryScroll.setFillViewport(false);
++        categoryRow = new LinearLayout(this);
++        categoryRow.setOrientation(LinearLayout.HORIZONTAL);
++        categoryRow.setGravity(Gravity.CENTER_VERTICAL);
++        categoryRow.setPadding(0, 0, 0, dp(7));
++        for (String category : AppProfile.categories()) {
++            Button chip = button(category);
++            chip.setTag(category);
++            chip.setMinHeight(dp(tv ? 48 : 42));
++            chip.setOnClickListener(v -> {
++                mode = "home";
++                selectedCategory = String.valueOf(v.getTag());
++                applyFilter();
++                refreshCategoryStyles();
++            });
++            categoryRow.addView(chip);
++        }
++        categoryScroll.addView(categoryRow, new HorizontalScrollView.LayoutParams(
++                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++        root.addView(categoryScroll);
++
+         LinearLayout searchRow = new LinearLayout(this);
+         searchRow.setOrientation(LinearLayout.HORIZONTAL);
+         search = new EditText(this);
+@@ -186,6 +212,7 @@
+         grid.setAdapter(adapter);
+         root.addView(grid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+         setContentView(root);
++        refreshCategoryStyles();
+ 
+         if (tv) home.requestFocus(); else search.clearFocus();
+     }
+@@ -263,6 +290,7 @@
+         for (Models.VideoItem v : allVideos) {
+             if ("favourites".equals(mode) && !fav.contains(v.id)) continue;
+             if ("history".equals(mode) && !historyRank.containsKey(v.id)) continue;
++            if ("home".equals(mode) && !matchesCategory(v, selectedCategory)) continue;
+             if (!q.isEmpty()) {
+                 String hay = (v.title + " " + v.channelTitle).toLowerCase(Locale.US);
+                 boolean every = true;
+@@ -271,12 +299,122 @@
+             }
+             out.add(v);
+         }
+-        if ("history".equals(mode)) out.sort((a,b) -> Integer.compare(historyRank.getOrDefault(a.id, 9999), historyRank.getOrDefault(b.id, 9999)));
++
++        if ("history".equals(mode)) {
++            out.sort((a,b) -> Integer.compare(historyRank.getOrDefault(a.id, 9999), historyRank.getOrDefault(b.id, 9999)));
++        } else if ("home".equals(mode) && "Recommended".equals(selectedCategory)) {
++            ArrayList<Models.VideoItem> unseen = new ArrayList<>();
++            ArrayList<Models.VideoItem> seen = new ArrayList<>();
++            for (Models.VideoItem v : out) {
++                if (historyRank.containsKey(v.id)) seen.add(v); else unseen.add(v);
++            }
++            unseen = diversifyByChannel(unseen);
++            seen = diversifyByChannel(seen);
++            out.clear();
++            out.addAll(unseen);
++            out.addAll(seen);
++        } else if ("home".equals(mode) && "New Videos".equals(selectedCategory) && out.size() > 60) {
++            out = new ArrayList<>(out.subList(0, 60));
++        }
++
+         adapter.setItems(out);
+-        String label = "home".equals(mode) ? "Approved" : ("favourites".equals(mode) ? "Favourites" : "History");
++        String label;
++        if ("home".equals(mode)) label = selectedCategory;
++        else label = "favourites".equals(mode) ? "Favourites" : "History";
+         if (!allVideos.isEmpty()) status.setText(label + ": " + out.size() + " of " + allVideos.size() + limitStatus());
+     }
+ 
++    private ArrayList<Models.VideoItem> diversifyByChannel(List<Models.VideoItem> source) {
++        ArrayList<Models.VideoItem> pool = new ArrayList<>(source);
++        ArrayList<Models.VideoItem> mixed = new ArrayList<>();
++        String last = "";
++        while (!pool.isEmpty()) {
++            int pick = 0;
++            for (int i = 0; i < pool.size(); i++) {
++                String c = safeLower(pool.get(i).channelTitle);
++                if (last.isEmpty() || !c.equals(last)) { pick = i; break; }
++            }
++            Models.VideoItem v = pool.remove(pick);
++            mixed.add(v);
++            last = safeLower(v.channelTitle);
++        }
++        return mixed;
++    }
++
++    private boolean matchesCategory(Models.VideoItem v, String category) {
++        if (category == null || category.isEmpty() || "Recommended".equals(category) || "New Videos".equals(category)) return true;
++        String title = safeLower(v.title);
++        String channel = safeLower(v.channelTitle);
++        String hay = title + " " + channel;
++
++        if ("Stories & Cartoons".equals(category)) {
++            return containsAny(channel, "bluey", "peppa pig", "curious george", "hey duggee", "storybots", "pbs kids")
++                    || containsAny(title, "story", "stories", "cartoon", "episode", "movie", "adventure");
++        }
++        if ("Animals".equals(category)) {
++            return containsAny(channel, "wild kratts", "brave wilderness", "national geographic", "nat geo", "bbc earth", "octonauts")
++                    || containsAny(hay, "animal", "wildlife", "ocean", "sea ", "dinosaur", "shark", "whale", "lion", "tiger", "elephant", "bird", "insect", "creature");
++        }
++        if ("Science".equals(category)) {
++            return containsAny(channel, "scishow kids", "science max", "operation ouch", "smartereveryday", "action lab", "kurzgesagt", "ted-ed", "crash course kids", "mark rober")
++                    || containsAny(hay, "science", "experiment", "physics", "chemistry", "biology", "body", "brain", "energy", "planet", "how does", "why does");
++        }
++        if ("Engineering".equals(category)) {
++            return containsAny(channel, "mark rober", "smartereveryday", "action lab")
++                    || containsAny(hay, "engineering", "engineer", "machine", "robot", "build", "invention", "mechanic", "technology", "rocket");
++        }
++        if ("Space".equals(category)) {
++            return containsAny(hay, "space", "planet", "solar system", "moon", "mars", "rocket", "astronaut", "galaxy", "universe", "star ", "stars", "black hole", "satellite");
++        }
++        if ("History".equals(category)) {
++            return containsAny(channel, "horrible histories")
++                    || containsAny(hay, "history", "historic", "ancient", "roman", "egypt", "medieval", "victorian", "war ", "century", "civilization", "civilisation", "king ", "queen ");
++        }
++        if ("Numbers & Reading".equals(category)) {
++            return containsAny(channel, "numberblocks", "alphablocks")
++                    || containsAny(hay, "number", "count", "math", "maths", "addition", "subtract", "alphabet", "phonics", "reading", "letter", "word ", "spelling");
++        }
++        if ("Art & Making".equals(category)) {
++            return containsAny(channel, "art for kids hub", "maddie moate")
++                    || containsAny(hay, "draw", "drawing", "art ", "paint", "craft", "make ", "making", "diy", "create", "how to make");
++        }
++        if ("Move & Dance".equals(category)) {
++            return containsAny(channel, "danny go")
++                    || containsAny(hay, "dance", "move ", "movement", "exercise", "workout", "sing along", "song");
++        }
++        return true;
++    }
++
++    private void refreshCategoryStyles() {
++        if (categoryRow == null) return;
++        for (int i = 0; i < categoryRow.getChildCount(); i++) {
++            View child = categoryRow.getChildAt(i);
++            if (!(child instanceof Button)) continue;
++            Button b = (Button) child;
++            boolean active = "home".equals(mode) && String.valueOf(b.getTag()).equals(selectedCategory);
++            GradientDrawable bg = new GradientDrawable();
++            bg.setCornerRadius(dp(18));
++            bg.setColor(active ? Color.rgb(225, 38, 58) : Color.rgb(43, 45, 52));
++            bg.setStroke(dp(1), active ? Color.rgb(255, 80, 95) : Color.rgb(82, 85, 96));
++            b.setBackground(bg);
++            b.setTextColor(Color.WHITE);
++            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
++                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++            lp.setMargins(0, 0, dp(8), 0);
++            b.setLayoutParams(lp);
++        }
++    }
++
++    private static boolean containsAny(String hay, String... needles) {
++        String h = safeLower(hay);
++        for (String n : needles) if (n != null && !n.isEmpty() && h.contains(n.toLowerCase(Locale.US))) return true;
++        return false;
++    }
++
++    private static String safeLower(String s) {
++        return s == null ? "" : s.toLowerCase(Locale.US);
++    }
++
+     private void openVideo(Models.VideoItem item) {
+         int limit = prefs.getDailyLimitMinutes();
+         if (limit > 0 && prefs.getTodayWatchSeconds() >= limit * 60L) {

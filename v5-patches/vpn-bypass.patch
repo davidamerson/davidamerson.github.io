@@ -1,0 +1,189 @@
+--- kidsv4work/app/src/main/java/com/kidsvideo/app/PlayerActivity.java	2026-10-18 16:16:20.102558181 +0000
++++ kidsv5work/app/src/main/java/com/kidsvideo/app/PlayerActivity.java	2026-10-18 16:46:25.803450963 +0000
+@@ -44,6 +44,11 @@
+     private boolean usedDirectFallback = false;
+     private boolean buffering = false;
+     private int playerState = -99;
++    private boolean playerReady = false;
++    private boolean vpnWasDefaultRoute = false;
++    private boolean vpnBypassBound = false;
++    private ConnectivityManager connectivityManager;
++    private Network playbackNetwork;
+     private long lastTickMs = 0;
+     private String videoId;
+     private TextView status;
+@@ -69,6 +74,15 @@
+         }
+     };
+ 
++    private final Runnable initializationWatchdog = new Runnable() {
++        @Override public void run() {
++            if (isFinishing() || playerReady || usedDirectFallback) return;
++            status.setVisibility(View.VISIBLE);
++            status.setText("Player did not start — trying YouTube's direct player…");
++            loadDirectFallback();
++        }
++    };
++
+     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+     @Override protected void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
+@@ -79,6 +93,8 @@
+             return;
+         }
+ 
++        preparePlaybackNetwork();
++
+         FrameLayout root = new FrameLayout(this);
+         root.setBackgroundColor(Color.BLACK);
+         webView = new WebView(this);
+@@ -88,7 +104,9 @@
+         root.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+ 
+         status = new TextView(this);
+-        status.setText("Loading video…");
++        if (vpnBypassBound) status.setText("VPN is on — using direct internet for video…");
++        else if (vpnWasDefaultRoute) status.setText("VPN is routing this app — testing player…");
++        else status.setText("Loading video…");
+         status.setTextColor(Color.WHITE);
+         status.setTextSize(16f);
+         status.setBackgroundColor(0x66000000);
+@@ -141,9 +159,8 @@
+                     }, 1800);
+                     handler.postDelayed(() -> {
+                         if (isFinishing() || !usedDirectFallback) return;
+-                        if (isVpnActive()) {
+-                            status.setVisibility(View.VISIBLE);
+-                            status.setText("VPN detected. If video remains at 0:00, change VPN server or exclude this app from the VPN.");
++                        if (vpnWasDefaultRoute && !vpnBypassBound) {
++                            showVpnRoutingHelpIfNeeded();
+                         }
+                     }, 15000);
+                 }
+@@ -151,6 +168,7 @@
+         });
+ 
+         loadOfficialPlayer();
++        handler.postDelayed(initializationWatchdog, 10000);
+         lastTickMs = System.currentTimeMillis();
+         handler.post(ticker);
+         webView.requestFocus();
+@@ -173,6 +191,7 @@
+ 
+     private void loadDirectFallback() {
+         if (usedDirectFallback) return;
++        handler.removeCallbacks(initializationWatchdog);
+         usedDirectFallback = true;
+         playing = false;
+         status.setVisibility(View.VISIBLE);
+@@ -187,6 +206,8 @@
+     private final class PlayerBridge {
+         @JavascriptInterface public void ready() {
+             runOnUiThread(() -> {
++                playerReady = true;
++                handler.removeCallbacks(initializationWatchdog);
+                 buffering = false;
+                 status.setText("Ready — press Play");
+                 handler.postDelayed(() -> status.setVisibility(View.GONE), 1400);
+@@ -224,6 +245,7 @@
+     }
+ 
+     private void handlePlayerError(int code) {
++        handler.removeCallbacks(initializationWatchdog);
+         handler.removeCallbacks(bufferingWatchdog);
+         buffering = false;
+         playing = false;
+@@ -244,24 +266,74 @@
+                 .show();
+     }
+ 
+-    private boolean isVpnActive() {
++    private void preparePlaybackNetwork() {
+         try {
+-            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+-            if (cm == null) return false;
+-            if (android.os.Build.VERSION.SDK_INT >= 23) {
+-                Network active = cm.getActiveNetwork();
+-                if (active == null) return false;
+-                NetworkCapabilities caps = cm.getNetworkCapabilities(active);
+-                return caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
++            connectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
++            if (connectivityManager == null || android.os.Build.VERSION.SDK_INT < 23) return;
++
++            Network active = connectivityManager.getActiveNetwork();
++            NetworkCapabilities activeCaps = active == null ? null : connectivityManager.getNetworkCapabilities(active);
++            vpnWasDefaultRoute = activeCaps != null && activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
++            if (!vpnWasDefaultRoute) return;
++
++            Network best = null;
++            int bestScore = Integer.MIN_VALUE;
++            for (Network n : connectivityManager.getAllNetworks()) {
++                if (n == null || (active != null && n.equals(active))) continue;
++                NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(n);
++                if (caps == null) continue;
++                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
++                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
++
++                boolean physical = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
++                        || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
++                        || caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
++                if (!physical) continue;
++
++                int score = 0;
++                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) score += 100;
++                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) score += 30;
++                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) score += 25;
++                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) score += 10;
++                if (score > bestScore) { bestScore = score; best = n; }
+             }
+-            for (Network n : cm.getAllNetworks()) {
+-                NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+-                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return true;
++
++            if (best != null && connectivityManager.bindProcessToNetwork(best)) {
++                playbackNetwork = best;
++                vpnBypassBound = true;
+             }
++        } catch (Exception ignored) {
++            vpnBypassBound = false;
++        }
++    }
++
++    private boolean isVpnActive() {
++        try {
++            ConnectivityManager cm = connectivityManager != null
++                    ? connectivityManager
++                    : (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
++            if (cm == null) return false;
++            Network active = cm.getActiveNetwork();
++            if (active == null) return false;
++            NetworkCapabilities caps = cm.getNetworkCapabilities(active);
++            return caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+         } catch (Exception ignored) {}
+         return false;
+     }
+ 
++    private void restoreDefaultNetworkRoute() {
++        if (!vpnBypassBound || connectivityManager == null) return;
++        try { connectivityManager.bindProcessToNetwork(null); } catch (Exception ignored) {}
++        vpnBypassBound = false;
++        playbackNetwork = null;
++    }
++
++    private void showVpnRoutingHelpIfNeeded() {
++        if (!vpnWasDefaultRoute || vpnBypassBound || status == null || isFinishing()) return;
++        status.setVisibility(View.VISIBLE);
++        status.setText("This VPN blocks app bypass. In your VPN app, exclude Son Video / Daughter Video from the VPN (Split tunnelling / Excluded apps).");
++    }
++
+     private void finishWithResult(boolean didEnd) {
+         if (isFinishing()) return;
+         ended = ended || didEnd;
+@@ -299,6 +371,7 @@
+             webView.destroy();
+             webView = null;
+         }
++        restoreDefaultNetworkRoute();
+         super.onDestroy();
+     }
+ 

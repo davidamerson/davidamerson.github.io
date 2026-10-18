@@ -1,0 +1,85 @@
+name: Build Kids Video v7 APKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-v4-build" ]
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "kids-video-v4-parts/**"
+      - "v4.1-patches/**"
+      - "v6-patches/**"
+      - "v7-patches/**"
+      - ".github/workflows/build-kids-video-v4.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: kids-video-v6-debug-keystore-v1
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Restore and patch source tree
+        run: |
+          rm -rf kids-video-v4
+          mkdir -p kids-video-v4
+          cat kids-video-v4-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-v4-source.tar.gz
+          echo "66a066565a28962631a4f730ea9ce5ce5cd4a12e72dac408fbea81bf155f734e  /tmp/kids-video-v4-source.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kids-video-v4-source.tar.gz -C kids-video-v4
+          test -f kids-video-v4/app/build.gradle
+          printf '%s\n' 'android.useAndroidX=true' > kids-video-v4/gradle.properties
+          if ! grep -q "buildFeatures" kids-video-v4/app/build.gradle; then
+            sed -i '/compileSdk 36/a\    buildFeatures { buildConfig = true }' kids-video-v4/app/build.gradle
+          fi
+          cd kids-video-v4
+          patch -p1 < ../v4.1-patches/a.patch
+          patch -p1 < ../v4.1-patches/b.patch
+          patch -p1 < ../v4.1-patches/c.patch
+          patch -p1 < ../v6-patches/twa.patch
+          patch -p1 < ../v7-patches/custom-tabs-watch.patch
+          grep -q "versionName '7.0.0'" app/build.gradle
+          grep -q "androidx.browser:browser:1.10.0" app/build.gradle
+          grep -q "BrowserPlaybackActivity" app/src/main/AndroidManifest.xml
+          grep -q "m.youtube.com" app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "www.youtube.com" app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "setSendToExternalDefaultHandlerEnabled(false)" app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "Stories & Cartoons" app/src/main/java/com/kidsvideo/app/MainActivity.java
+          ! grep -q "TwaPlaybackActivity" app/src/main/AndroidManifest.xml
+
+      - name: Build Daughter and Son APKs
+        working-directory: kids-video-v4
+        run: gradle --no-daemon --stacktrace :app:assembleDaughterDebug :app:assembleSonDebug
+
+      - name: Package and verify outputs
+        run: |
+          mkdir -p dist
+          cp kids-video-v4/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v7.apk
+          cp kids-video-v4/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v7.apk
+          test -s dist/Daughter-Video-v7.apk
+          test -s dist/Son-Video-v7.apk
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+          keytool -printcert -jarfile dist/Daughter-Video-v7.apk > dist/SIGNING-CERT-Daughter.txt
+          keytool -printcert -jarfile dist/Son-Video-v7.apk > dist/SIGNING-CERT-Son.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v7-Source.tar.gz -C kids-video-v4 .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kids-video-v7-apks
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,199 @@
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv4work/app/build.gradle kidsv6lean/app/build.gradle
+--- kidsv4work/app/build.gradle	2026-10-18 16:16:39.042414761 +0000
++++ kidsv6lean/app/build.gradle	2026-10-18 17:29:03.062850963 +0000
+@@ -9,10 +9,10 @@
+ 
+     defaultConfig {
+         applicationId 'com.kidsvideo.app'
+-        minSdk 23
++        minSdk 24
+         targetSdk 36
+-        versionCode 40100
+-        versionName '4.1.0'
++        versionCode 60000
++        versionName '6.0.0'
+     }
+ 
+     flavorDimensions += 'child'
+@@ -52,3 +52,8 @@
+         }
+     }
+ }
++
++
++dependencies {
++    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4'
++}
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv4work/app/src/main/AndroidManifest.xml kidsv6lean/app/src/main/AndroidManifest.xml
+--- kidsv4work/app/src/main/AndroidManifest.xml	2026-10-18 00:00:00.000000000 +0000
++++ kidsv6lean/app/src/main/AndroidManifest.xml	2026-10-18 17:29:03.063991282 +0000
+@@ -22,8 +22,9 @@
+         android:usesCleartextTraffic="false">
+ 
+         <activity
+-            android:name=".PlayerActivity"
++            android:name=".TwaPlaybackActivity"
+             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
++            android:excludeFromRecents="true"
+             android:exported="false"
+             android:screenOrientation="sensorLandscape" />
+ 
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv4work/app/src/main/java/com/kidsvideo/app/MainActivity.java kidsv6lean/app/src/main/java/com/kidsvideo/app/MainActivity.java
+--- kidsv4work/app/src/main/java/com/kidsvideo/app/MainActivity.java	2026-10-18 16:16:20.101817211 +0000
++++ kidsv6lean/app/src/main/java/com/kidsvideo/app/MainActivity.java	2026-10-18 17:29:03.065033083 +0000
+@@ -422,9 +422,9 @@
+             return;
+         }
+         lastPlayed = item;
+-        Intent i = new Intent(this, PlayerActivity.class);
+-        i.putExtra(PlayerActivity.EXTRA_VIDEO_ID, item.id);
+-        i.putExtra(PlayerActivity.EXTRA_TITLE, item.title);
++        Intent i = new Intent(this, TwaPlaybackActivity.class);
++        i.putExtra(TwaPlaybackActivity.EXTRA_VIDEO_ID, item.id);
++        i.putExtra(TwaPlaybackActivity.EXTRA_TITLE, item.title);
+         startActivityForResult(i, REQ_PLAYER);
+     }
+ 
+@@ -505,7 +505,7 @@
+     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+         super.onActivityResult(requestCode, resultCode, data);
+         if (requestCode == REQ_PLAYER && resultCode == RESULT_OK && data != null) {
+-            long watched = data.getLongExtra(PlayerActivity.RESULT_WATCH_SECONDS, 0);
++            long watched = data.getLongExtra(TwaPlaybackActivity.RESULT_WATCH_SECONDS, 0);
+             if (watched > 0) prefs.addWatchSeconds(watched);
+             if (lastPlayed != null && watched >= 10) prefs.addHistory(lastPlayed.id);
+             applyFilter();
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv4work/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java kidsv6lean/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java
+--- kidsv4work/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java	1970-01-01 00:00:00.000000000 +0000
++++ kidsv6lean/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java	2026-10-18 17:29:03.066291701 +0000
+@@ -0,0 +1,130 @@
++package com.kidsvideo.app;
++
++import android.app.Activity;
++import android.content.Intent;
++import android.graphics.Color;
++import android.net.Uri;
++import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.SystemClock;
++import android.view.Gravity;
++import android.view.ViewGroup;
++import android.widget.LinearLayout;
++import android.widget.ProgressBar;
++import android.widget.TextView;
++
++import com.google.androidbrowserhelper.trusted.TwaLauncher;
++
++/**
++ * Small native trampoline that launches the hosted YouTube player as a Trusted Web Activity.
++ * The actual player is rendered/networked by the device browser (normally Chrome), not WebView.
++ */
++public final class TwaPlaybackActivity extends Activity {
++    public static final String EXTRA_VIDEO_ID = "video_id";
++    public static final String EXTRA_TITLE = "title";
++    public static final String RESULT_WATCH_SECONDS = "watch_seconds";
++
++    private final Handler handler = new Handler(Looper.getMainLooper());
++    private TwaLauncher twaLauncher;
++    private boolean launched;
++    private boolean browserTookFocus;
++    private boolean finished;
++    private long launchElapsed;
++
++    @Override protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        getWindow().setStatusBarColor(Color.BLACK);
++        getWindow().setNavigationBarColor(Color.BLACK);
++        buildLoadingScreen();
++
++        String videoId = getIntent().getStringExtra(EXTRA_VIDEO_ID);
++        if (videoId == null || !videoId.matches("^[A-Za-z0-9_-]{11}$")) {
++            finishWithResult(0);
++            return;
++        }
++
++        Uri url = new Uri.Builder()
++                .scheme("https")
++                .authority("davidamerson.github.io")
++                .path("kids-player.html")
++                .appendQueryParameter("v", videoId)
++                .appendQueryParameter("profile", AppProfile.isSon() ? "son" : "daughter")
++                .build();
++
++        launchElapsed = SystemClock.elapsedRealtime();
++        handler.post(() -> {
++            if (isFinishing()) return;
++            try {
++                twaLauncher = new TwaLauncher(this);
++                launched = true;
++                twaLauncher.launch(url);
++            } catch (Throwable t) {
++                // Last-resort browser intent. It still keeps playback in the browser/VPN path, never WebView.
++                try {
++                    Intent browser = new Intent(Intent.ACTION_VIEW, url);
++                    browser.addCategory(Intent.CATEGORY_BROWSABLE);
++                    launched = true;
++                    startActivity(browser);
++                } catch (Throwable ignored) {
++                    finishWithResult(0);
++                }
++            }
++        });
++    }
++
++    private void buildLoadingScreen() {
++        LinearLayout root = new LinearLayout(this);
++        root.setOrientation(LinearLayout.VERTICAL);
++        root.setGravity(Gravity.CENTER);
++        root.setBackgroundColor(Color.BLACK);
++        ProgressBar progress = new ProgressBar(this);
++        TextView text = new TextView(this);
++        text.setText("Opening video…");
++        text.setTextColor(Color.WHITE);
++        text.setTextSize(18f);
++        text.setPadding(0, 24, 0, 0);
++        root.addView(progress, new LinearLayout.LayoutParams(72, 72));
++        root.addView(text, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++        setContentView(root);
++    }
++
++    @Override protected void onPause() {
++        super.onPause();
++        if (launched) browserTookFocus = true;
++    }
++
++    @Override protected void onResume() {
++        super.onResume();
++        if (launched && browserTookFocus && !finished) {
++            // Returning from the browser/TWA. Give Android a moment so transient focus changes do not close early.
++            handler.postDelayed(() -> {
++                if (!isFinishing() && browserTookFocus) {
++                    long seconds = Math.max(0, (SystemClock.elapsedRealtime() - launchElapsed) / 1000L);
++                    finishWithResult(seconds);
++                }
++            }, 300);
++        }
++    }
++
++    private void finishWithResult(long seconds) {
++        if (finished) return;
++        finished = true;
++        Intent result = new Intent();
++        result.putExtra(RESULT_WATCH_SECONDS, seconds);
++        setResult(RESULT_OK, result);
++        finish();
++    }
++
++    @Override public void onBackPressed() {
++        finishWithResult(Math.max(0, (SystemClock.elapsedRealtime() - launchElapsed) / 1000L));
++    }
++
++    @Override protected void onDestroy() {
++        handler.removeCallbacksAndMessages(null);
++        if (twaLauncher != null) {
++            try { twaLauncher.destroy(); } catch (Throwable ignored) {}
++        }
++        super.onDestroy();
++    }
++}

@@ -1,0 +1,133 @@
+--- kidsv4src/app/src/main/java/com/kidsvideo/app/PlayerActivity.java	2026-10-18 00:00:00.000000000 +0000
++++ kidsv4work/app/src/main/java/com/kidsvideo/app/PlayerActivity.java	2026-10-18 16:16:20.102558181 +0000
+@@ -6,6 +6,9 @@
+ import android.content.Intent;
+ import android.graphics.Color;
+ import android.net.Uri;
++import android.net.ConnectivityManager;
++import android.net.Network;
++import android.net.NetworkCapabilities;
+ import android.os.Bundle;
+ import android.os.Handler;
+ import android.os.Looper;
+@@ -39,6 +42,8 @@
+     private boolean playing = false;
+     private boolean ended = false;
+     private boolean usedDirectFallback = false;
++    private boolean buffering = false;
++    private int playerState = -99;
+     private long lastTickMs = 0;
+     private String videoId;
+     private TextView status;
+@@ -55,6 +60,15 @@
+         }
+     };
+ 
++    private final Runnable bufferingWatchdog = new Runnable() {
++        @Override public void run() {
++            if (isFinishing() || !buffering || playing || usedDirectFallback) return;
++            status.setVisibility(View.VISIBLE);
++            status.setText("Playback is taking too long — trying YouTube's direct player…");
++            loadDirectFallback();
++        }
++    };
++
+     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+     @Override protected void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
+@@ -121,11 +135,17 @@
+             @Override public void onPageFinished(WebView view, String url) {
+                 super.onPageFinished(view, url);
+                 if (usedDirectFallback) {
+-                    status.setText("YouTube player");
+-                    handler.postDelayed(() -> status.setVisibility(View.GONE), 1200);
+-                    // Direct fallback cannot report IFrame API state reliably, so count foreground playback conservatively.
+-                    playing = true;
+-                    lastTickMs = System.currentTimeMillis();
++                    status.setText("Alternate YouTube player — press Play");
++                    handler.postDelayed(() -> {
++                        if (status != null) status.setVisibility(View.GONE);
++                    }, 1800);
++                    handler.postDelayed(() -> {
++                        if (isFinishing() || !usedDirectFallback) return;
++                        if (isVpnActive()) {
++                            status.setVisibility(View.VISIBLE);
++                            status.setText("VPN detected. If video remains at 0:00, change VPN server or exclude this app from the VPN.");
++                        }
++                    }, 15000);
+                 }
+             }
+         });
+@@ -167,15 +187,35 @@
+     private final class PlayerBridge {
+         @JavascriptInterface public void ready() {
+             runOnUiThread(() -> {
++                buffering = false;
+                 status.setText("Ready — press Play");
+                 handler.postDelayed(() -> status.setVisibility(View.GONE), 1400);
+             });
+         }
+         @JavascriptInterface public void state(int state) {
+             runOnUiThread(() -> {
+-                if (state == 1) { playing = true; lastTickMs = System.currentTimeMillis(); }
+-                else if (state == 0) { playing = false; ended = true; finishWithResult(true); }
+-                else { playing = false; }
++                playerState = state;
++                handler.removeCallbacks(bufferingWatchdog);
++                if (state == 1) {
++                    buffering = false;
++                    playing = true;
++                    lastTickMs = System.currentTimeMillis();
++                    status.setVisibility(View.GONE);
++                } else if (state == 3) {
++                    playing = false;
++                    buffering = true;
++                    status.setVisibility(View.VISIBLE);
++                    status.setText("Buffering…");
++                    handler.postDelayed(bufferingWatchdog, 12000);
++                } else if (state == 0) {
++                    buffering = false;
++                    playing = false;
++                    ended = true;
++                    finishWithResult(true);
++                } else {
++                    buffering = false;
++                    playing = false;
++                }
+             });
+         }
+         @JavascriptInterface public void error(int code) {
+@@ -184,6 +224,8 @@
+     }
+ 
+     private void handlePlayerError(int code) {
++        handler.removeCallbacks(bufferingWatchdog);
++        buffering = false;
+         playing = false;
+         if ((code == 153 || code == 5) && !usedDirectFallback) {
+             loadDirectFallback();
+@@ -202,6 +244,24 @@
+                 .show();
+     }
+ 
++    private boolean isVpnActive() {
++        try {
++            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
++            if (cm == null) return false;
++            if (android.os.Build.VERSION.SDK_INT >= 23) {
++                Network active = cm.getActiveNetwork();
++                if (active == null) return false;
++                NetworkCapabilities caps = cm.getNetworkCapabilities(active);
++                return caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
++            }
++            for (Network n : cm.getAllNetworks()) {
++                NetworkCapabilities caps = cm.getNetworkCapabilities(n);
++                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return true;
++            }
++        } catch (Exception ignored) {}
++        return false;
++    }
++
+     private void finishWithResult(boolean didEnd) {
+         if (isFinishing()) return;
+         ended = ended || didEnd;

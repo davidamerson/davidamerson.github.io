@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>VPN Playback Test</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:system-ui,sans-serif;overflow:hidden}
+    #stage{position:fixed;inset:0;background:#000}
+    iframe,#player{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+    #label{position:fixed;top:10px;left:10px;z-index:9999;background:rgba(0,0,0,.72);padding:8px 10px;border-radius:8px;font-size:14px;max-width:85%}
+    #msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;box-sizing:border-box}
+  </style>
+</head>
+<body>
+<div id="stage"><div id="msg">Preparing playback test…</div></div>
+<div id="label"></div>
+<script>
+(() => {
+  const q = new URLSearchParams(location.search);
+  const mode = q.get('mode') || 'embed-min';
+  const id = (q.get('v') || 'M7lc1UVf-VE').trim();
+  const label = document.getElementById('label');
+  const stage = document.getElementById('stage');
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) {
+    document.getElementById('msg').textContent='Invalid video ID';
+    return;
+  }
+  const labels = {
+    'watch':'1 — Direct YouTube watch page',
+    'mobile':'2 — Direct mobile YouTube watch page',
+    'short':'3 — youtu.be short link',
+    'embed-min':'4 — Minimal youtube.com/embed iframe',
+    'embed-origin':'5 — Embed iframe + origin/referrer params, no sandbox',
+    'embed-jsapi':'6 — Embed iframe + enablejsapi=1 + origin',
+    'nocookie':'7 — youtube-nocookie.com embed',
+    'iframe-api':'8 — Official YouTube IFrame JavaScript API',
+    'current':'9 — Exact current hosted player.html path',
+    'oembed':'10 — YouTube embed with feature=oembed'
+  };
+  label.textContent = labels[mode] || mode;
+  const redirect = (url) => { location.replace(url); };
+  const frame = (url, opts={}) => {
+    stage.innerHTML='';
+    const f=document.createElement('iframe');
+    f.src=url;
+    f.allow='autoplay; encrypted-media; picture-in-picture; fullscreen';
+    f.allowFullscreen=true;
+    f.referrerPolicy='strict-origin-when-cross-origin';
+    if (opts.sandbox) f.setAttribute('sandbox',opts.sandbox);
+    stage.appendChild(f);
+  };
+  const origin='https://davidamerson.github.io';
+  switch(mode){
+    case 'watch':
+      redirect('https://www.youtube.com/watch?v='+encodeURIComponent(id)+'&app=desktop');
+      break;
+    case 'mobile':
+      redirect('https://m.youtube.com/watch?v='+encodeURIComponent(id));
+      break;
+    case 'short':
+      redirect('https://youtu.be/'+encodeURIComponent(id));
+      break;
+    case 'embed-min':
+      frame('https://www.youtube.com/embed/'+encodeURIComponent(id));
+      break;
+    case 'embed-origin':
+      frame('https://www.youtube.com/embed/'+encodeURIComponent(id)+'?playsinline=1&rel=0&origin='+encodeURIComponent(origin)+'&widget_referrer='+encodeURIComponent(location.href));
+      break;
+    case 'embed-jsapi':
+      frame('https://www.youtube.com/embed/'+encodeURIComponent(id)+'?enablejsapi=1&playsinline=1&rel=0&origin='+encodeURIComponent(origin));
+      break;
+    case 'nocookie':
+      frame('https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?playsinline=1&rel=0');
+      break;
+    case 'iframe-api': {
+      stage.innerHTML='<div id="player"></div>';
+      const tag=document.createElement('script');
+      tag.src='https://www.youtube.com/iframe_api';
+      document.head.appendChild(tag);
+      window.onYouTubeIframeAPIReady=()=>{
+        new YT.Player('player',{
+          videoId:id,
+          playerVars:{playsinline:1,rel:0,origin:origin},
+          events:{onReady:e=>{},onError:e=>{label.textContent += ' — error '+e.data;}}
+        });
+      };
+      break;
+    }
+    case 'current':
+      redirect(origin+'/player.html?v='+encodeURIComponent(id));
+      break;
+    case 'oembed':
+      frame('https://www.youtube.com/embed/'+encodeURIComponent(id)+'?feature=oembed&playsinline=1&rel=0');
+      break;
+    default:
+      document.getElementById('msg').textContent='Unknown mode';
+  }
+})();
+</script>
+</body>
+</html>

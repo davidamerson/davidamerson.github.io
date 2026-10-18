@@ -1,0 +1,64 @@
+--- kidsv4src/app/build.gradle	2026-10-18 14:39:03.000000000 +0000
++++ kidsv4work/app/build.gradle	2026-10-18 16:16:39.042414761 +0000
+@@ -11,8 +11,8 @@
+         applicationId 'com.kidsvideo.app'
+         minSdk 23
+         targetSdk 36
+-        versionCode 40001
+-        versionName '4.0.0'
++        versionCode 40100
++        versionName '4.1.0'
+     }
+ 
+     flavorDimensions += 'child'
+--- kidsv4src/app/src/main/java/com/kidsvideo/app/AppProfile.java	2026-10-18 00:00:00.000000000 +0000
++++ kidsv4work/app/src/main/java/com/kidsvideo/app/AppProfile.java	2026-10-18 16:16:20.100528092 +0000
+@@ -56,6 +56,19 @@
+         return out;
+     }
+ 
++    static List<String> categories() {
++        if (isSon()) {
++            return Arrays.asList(
++                    "Recommended", "New Videos", "Science", "Animals", "Engineering",
++                    "Stories & Cartoons", "Space", "History", "Art & Making", "Numbers & Reading"
++            );
++        }
++        return Arrays.asList(
++                "Recommended", "New Videos", "Stories & Cartoons", "Animals", "Science",
++                "Numbers & Reading", "Art & Making", "Move & Dance"
++        );
++    }
++
+     static List<String> defaultBlockedWords() {
+         ArrayList<String> out = new ArrayList<>(Arrays.asList(
+                 "#shorts", "youtube shorts", "shorts only"
+--- kidsv4src/README.md	2026-10-18 16:15:02.150770203 +0000
++++ kidsv4work/README.md	2026-10-18 16:17:03.454462093 +0000
+@@ -1,4 +1,4 @@
+-# Kids Video v4 — Daughter + Son
++# Kids Video v4.1 — Daughter + Son
+ 
+ A fresh Android implementation of the family's curated YouTube experience. One source tree produces two independent APKs:
+ 
+@@ -7,7 +7,7 @@
+ 
+ ## What is different from the old v2 player
+ 
+-The app does **not** depend on a hosted `player.html`. Playback uses Android's system WebView and the official YouTube embedded player. Local player HTML is loaded with `WebView.loadDataWithBaseURL()` using an HTTPS origin based on the installed Android application ID, so YouTube receives the client `Referer`/identity required by its current embedded-player rules. If the IFrame API reports identity/HTML5 error 153/5, the app retries once using YouTube's direct embed URL with an explicit `Referer` request header.
++The app does **not** depend on a hosted `player.html`. Playback uses Android's system WebView and the official YouTube embedded player. Local player HTML is loaded with `WebView.loadDataWithBaseURL()` using an HTTPS origin based on the installed Android application ID, so YouTube receives the client `Referer`/identity required by its current embedded-player rules. If the IFrame API reports identity/HTML5 error 153/5, or remains in YouTube's buffering state for 12 seconds, the app retries once using YouTube's direct embed URL with an explicit `Referer` request header. If Android reports an active VPN and playback still remains stuck, the app shows a clear VPN-specific diagnostic instead of silently spinning forever.
+ 
+ This architecture intentionally follows YouTube's current Android WebView guidance rather than trying to extract or proxy YouTube media streams.
+ 
+@@ -24,6 +24,11 @@
+ - Optional three-question spoken-English practice after a meaningful watch session.
+ - No analytics SDK or third-party app dependency is included.
+ 
++
++## Categories restored in v4.1
++
++The child home screen again has category chips similar to the earlier v2 browsing experience. Daughter: Recommended, New Videos, Stories & Cartoons, Animals, Science, Numbers & Reading, Art & Making, Move & Dance. Son: Recommended, New Videos, Science, Animals, Engineering, Stories & Cartoons, Space, History, Art & Making, Numbers & Reading. Categories only filter the already-approved catalogue; they never perform unrestricted YouTube search. Recommended prioritizes unwatched videos and mixes channels to avoid long runs from one channel.
++
+ ## YouTube Data API usage
+ 
+ On first launch, enter the private YouTube Data API v3 key locally. The key is not compiled into the APK. The catalogue resolves each approved channel, reads its uploads playlist, then batches video details to check duration, embedding permission and Made-for-Kids status. `search.list` is used only as a one-time fallback if a channel handle cannot be resolved and the resolved channel ID is then cached.

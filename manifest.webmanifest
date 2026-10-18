@@ -1,7 +1,7 @@
 {
   "name": "Kids Video Player",
   "short_name": "Kids Video",
-  "start_url": "/player.html",
+  "start_url": "/kids-player.html",
   "scope": "/",
   "display": "fullscreen",
   "orientation": "landscape",

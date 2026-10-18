@@ -27,7 +27,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
-          key: kids-video-v5-debug-keystore-v1
+          key: kids-video-v6-debug-keystore-v1
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -41,6 +41,7 @@ jobs:
           echo "66a066565a28962631a4f730ea9ce5ce5cd4a12e72dac408fbea81bf155f734e  /tmp/kids-video-v4-source.tar.gz" | sha256sum -c -
           tar -xzf /tmp/kids-video-v4-source.tar.gz -C kids-video-v4
           test -f kids-video-v4/app/build.gradle
+          printf '%s\n' 'android.useAndroidX=true' > kids-video-v4/gradle.properties
           if ! grep -q "buildFeatures" kids-video-v4/app/build.gradle; then
             sed -i '/compileSdk 36/a\    buildFeatures { buildConfig = true }' kids-video-v4/app/build.gradle
           fi

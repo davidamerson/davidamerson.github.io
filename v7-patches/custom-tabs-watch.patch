@@ -1,0 +1,402 @@
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv6base/app/build.gradle kidsv7work2/app/build.gradle
+--- kidsv6base/app/build.gradle	2026-10-18 17:32:36.000000000 +0000
++++ kidsv7work2/app/build.gradle	2026-10-18 19:45:47.926617616 +0000
+@@ -11,8 +11,8 @@
+         applicationId 'com.kidsvideo.app'
+         minSdk 24
+         targetSdk 36
+-        versionCode 60000
+-        versionName '6.0.0'
++        versionCode 70000
++        versionName '7.0.0'
+     }
+ 
+     flavorDimensions += 'child'
+@@ -55,5 +55,5 @@
+ 
+ 
+ dependencies {
+-    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4'
++    implementation 'androidx.browser:browser:1.10.0'
+ }
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv6base/app/src/main/AndroidManifest.xml kidsv7work2/app/src/main/AndroidManifest.xml
+--- kidsv6base/app/src/main/AndroidManifest.xml	2026-10-18 17:32:36.000000000 +0000
++++ kidsv7work2/app/src/main/AndroidManifest.xml	2026-10-18 19:45:47.926836856 +0000
+@@ -22,7 +22,7 @@
+         android:usesCleartextTraffic="false">
+ 
+         <activity
+-            android:name=".TwaPlaybackActivity"
++            android:name=".BrowserPlaybackActivity"
+             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+             android:excludeFromRecents="true"
+             android:exported="false"
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv6base/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java kidsv7work2/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+--- kidsv6base/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java	1970-01-01 00:00:00.000000000 +0000
++++ kidsv7work2/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java	2026-10-18 19:45:47.927584523 +0000
+@@ -0,0 +1,206 @@
++package com.kidsvideo.app;
++
++import android.app.Activity;
++import android.content.ActivityNotFoundException;
++import android.content.Intent;
++import android.content.res.Configuration;
++import android.graphics.Color;
++import android.net.Uri;
++import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.SystemClock;
++import android.view.Gravity;
++import android.view.ViewGroup;
++import android.widget.LinearLayout;
++import android.widget.ProgressBar;
++import android.widget.TextView;
++
++import androidx.browser.customtabs.CustomTabColorSchemeParams;
++import androidx.browser.customtabs.CustomTabsClient;
++import androidx.browser.customtabs.CustomTabsIntent;
++
++/**
++ * Opens the normal YouTube watch page in a browser-powered Custom Tab.
++ *
++ * This deliberately does NOT use WebView, YouTube iframe/embed, or TWA. The user's
++ * ZIVPN remains the active network path. The normal YouTube watch page is the path
++ * that was physically verified to play correctly through that VPN.
++ *
++ * Because the page belongs to YouTube, Android does not allow this app to rewrite
++ * YouTube's HTML. We therefore minimize browser chrome and prevent hand-off to the
++ * YouTube app, while leaving YouTube's native player/full-screen controls intact.
++ */
++public final class BrowserPlaybackActivity extends Activity {
++    public static final String EXTRA_VIDEO_ID = "video_id";
++    public static final String EXTRA_TITLE = "title";
++    public static final String RESULT_WATCH_SECONDS = "watch_seconds";
++
++    private final Handler handler = new Handler(Looper.getMainLooper());
++    private boolean launched;
++    private boolean browserTookFocus;
++    private boolean finished;
++    private long launchElapsed;
++
++    @Override protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        getWindow().setStatusBarColor(Color.BLACK);
++        getWindow().setNavigationBarColor(Color.BLACK);
++        buildLoadingScreen();
++
++        String videoId = getIntent().getStringExtra(EXTRA_VIDEO_ID);
++        if (videoId == null || !videoId.matches("^[A-Za-z0-9_-]{11}$")) {
++            finishWithResult(0);
++            return;
++        }
++
++        // Phone/tablet: mobile watch page keeps the player dominant and pushes most
++        // surrounding YouTube content below it. TV: use the normal www watch page.
++        boolean tv = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_TYPE_MASK)
++                == Configuration.UI_MODE_TYPE_TELEVISION;
++        String host = tv ? "www.youtube.com" : "m.youtube.com";
++
++        Uri url = new Uri.Builder()
++                .scheme("https")
++                .authority(host)
++                .path("watch")
++                .appendQueryParameter("v", videoId)
++                .build();
++
++        launchElapsed = SystemClock.elapsedRealtime();
++        handler.post(() -> openWatchPage(url));
++    }
++
++    private void openWatchPage(Uri url) {
++        if (isFinishing()) return;
++
++        CustomTabColorSchemeParams colors = new CustomTabColorSchemeParams.Builder()
++                .setToolbarColor(Color.BLACK)
++                .setNavigationBarColor(Color.BLACK)
++                .setNavigationBarDividerColor(Color.BLACK)
++                .build();
++
++        CustomTabsIntent customTab = new CustomTabsIntent.Builder()
++                .setColorScheme(CustomTabsIntent.COLOR_SCHEME_DARK)
++                .setDefaultColorSchemeParams(colors)
++                .setShowTitle(false)
++                .setUrlBarHidingEnabled(true)
++                .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
++                .setBookmarksButtonEnabled(false)
++                .setDownloadButtonEnabled(false)
++                .setOpenInBrowserButtonState(CustomTabsIntent.OPEN_IN_BROWSER_STATE_OFF)
++                .setInstantAppsEnabled(false)
++                .setSendToExternalDefaultHandlerEnabled(false)
++                .setShareIdentityEnabled(false)
++                .setCloseButtonEnabled(true)
++                .setCloseButtonPosition(CustomTabsIntent.CLOSE_BUTTON_POSITION_START)
++                .build();
++
++        // Ask Android for the user's real browser Custom Tabs provider. This avoids
++        // opening the YouTube app and keeps playback on the same browser networking
++        // stack that passed the ZIVPN browser tests.
++        String browserPackage = null;
++        try {
++            browserPackage = CustomTabsClient.getPackageName(this, null);
++        } catch (Throwable ignored) {}
++        if (browserPackage != null && !browserPackage.isEmpty()) {
++            customTab.intent.setPackage(browserPackage);
++        }
++
++        try {
++            launched = true;
++            customTab.launchUrl(this, url);
++        } catch (ActivityNotFoundException | SecurityException e) {
++            // Very old/TV browsers may not implement Custom Tabs. Fall back only to
++            // a browser package if Android identified one; never intentionally hand
++            // the URL to the YouTube application.
++            if (browserPackage != null && !browserPackage.isEmpty()) {
++                try {
++                    Intent browser = new Intent(Intent.ACTION_VIEW, url);
++                    browser.addCategory(Intent.CATEGORY_BROWSABLE);
++                    browser.setPackage(browserPackage);
++                    launched = true;
++                    startActivity(browser);
++                    return;
++                } catch (Throwable ignored) {}
++            }
++            showCannotOpen();
++        } catch (Throwable t) {
++            showCannotOpen();
++        }
++    }
++
++    private void buildLoadingScreen() {
++        LinearLayout root = new LinearLayout(this);
++        root.setOrientation(LinearLayout.VERTICAL);
++        root.setGravity(Gravity.CENTER);
++        root.setBackgroundColor(Color.BLACK);
++
++        ProgressBar progress = new ProgressBar(this);
++        TextView text = new TextView(this);
++        text.setText("Opening video…");
++        text.setTextColor(Color.WHITE);
++        text.setTextSize(18f);
++        text.setPadding(0, 24, 0, 0);
++
++        root.addView(progress, new LinearLayout.LayoutParams(72, 72));
++        root.addView(text, new LinearLayout.LayoutParams(
++                ViewGroup.LayoutParams.WRAP_CONTENT,
++                ViewGroup.LayoutParams.WRAP_CONTENT));
++        setContentView(root);
++    }
++
++    private void showCannotOpen() {
++        LinearLayout root = new LinearLayout(this);
++        root.setOrientation(LinearLayout.VERTICAL);
++        root.setGravity(Gravity.CENTER);
++        root.setPadding(40, 40, 40, 40);
++        root.setBackgroundColor(Color.BLACK);
++        TextView text = new TextView(this);
++        text.setText("A compatible browser is required to play this video.");
++        text.setTextColor(Color.WHITE);
++        text.setTextSize(18f);
++        text.setGravity(Gravity.CENTER);
++        root.addView(text);
++        setContentView(root);
++    }
++
++    @Override protected void onPause() {
++        super.onPause();
++        if (launched) browserTookFocus = true;
++    }
++
++    @Override protected void onResume() {
++        super.onResume();
++        if (launched && browserTookFocus && !finished) {
++            // Closing the Custom Tab (X or Back from the watch page) returns directly
++            // to the Kids Video catalogue. A short delay avoids transient focus events.
++            handler.postDelayed(() -> {
++                if (!isFinishing() && browserTookFocus) {
++                    long seconds = Math.max(0,
++                            (SystemClock.elapsedRealtime() - launchElapsed) / 1000L);
++                    finishWithResult(seconds);
++                }
++            }, 350);
++        }
++    }
++
++    private void finishWithResult(long seconds) {
++        if (finished) return;
++        finished = true;
++        Intent result = new Intent();
++        result.putExtra(RESULT_WATCH_SECONDS, seconds);
++        setResult(RESULT_OK, result);
++        finish();
++    }
++
++    @Override public void onBackPressed() {
++        finishWithResult(Math.max(0,
++                (SystemClock.elapsedRealtime() - launchElapsed) / 1000L));
++    }
++
++    @Override protected void onDestroy() {
++        handler.removeCallbacksAndMessages(null);
++        super.onDestroy();
++    }
++}
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv6base/app/src/main/java/com/kidsvideo/app/MainActivity.java kidsv7work2/app/src/main/java/com/kidsvideo/app/MainActivity.java
+--- kidsv6base/app/src/main/java/com/kidsvideo/app/MainActivity.java	2026-10-18 17:32:36.000000000 +0000
++++ kidsv7work2/app/src/main/java/com/kidsvideo/app/MainActivity.java	2026-10-18 19:45:47.927213601 +0000
+@@ -422,9 +422,9 @@
+             return;
+         }
+         lastPlayed = item;
+-        Intent i = new Intent(this, TwaPlaybackActivity.class);
+-        i.putExtra(TwaPlaybackActivity.EXTRA_VIDEO_ID, item.id);
+-        i.putExtra(TwaPlaybackActivity.EXTRA_TITLE, item.title);
++        Intent i = new Intent(this, BrowserPlaybackActivity.class);
++        i.putExtra(BrowserPlaybackActivity.EXTRA_VIDEO_ID, item.id);
++        i.putExtra(BrowserPlaybackActivity.EXTRA_TITLE, item.title);
+         startActivityForResult(i, REQ_PLAYER);
+     }
+ 
+@@ -505,7 +505,7 @@
+     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+         super.onActivityResult(requestCode, resultCode, data);
+         if (requestCode == REQ_PLAYER && resultCode == RESULT_OK && data != null) {
+-            long watched = data.getLongExtra(TwaPlaybackActivity.RESULT_WATCH_SECONDS, 0);
++            long watched = data.getLongExtra(BrowserPlaybackActivity.RESULT_WATCH_SECONDS, 0);
+             if (watched > 0) prefs.addWatchSeconds(watched);
+             if (lastPlayed != null && watched >= 10) prefs.addHistory(lastPlayed.id);
+             applyFilter();
+diff -ruN '--exclude=build' '--exclude=.gradle' '--exclude=README.md' kidsv6base/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java kidsv7work2/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java
+--- kidsv6base/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java	2026-10-18 17:32:36.000000000 +0000
++++ kidsv7work2/app/src/main/java/com/kidsvideo/app/TwaPlaybackActivity.java	1970-01-01 00:00:00.000000000 +0000
+@@ -1,130 +0,0 @@
+-package com.kidsvideo.app;
+-
+-import android.app.Activity;
+-import android.content.Intent;
+-import android.graphics.Color;
+-import android.net.Uri;
+-import android.os.Bundle;
+-import android.os.Handler;
+-import android.os.Looper;
+-import android.os.SystemClock;
+-import android.view.Gravity;
+-import android.view.ViewGroup;
+-import android.widget.LinearLayout;
+-import android.widget.ProgressBar;
+-import android.widget.TextView;
+-
+-import com.google.androidbrowserhelper.trusted.TwaLauncher;
+-
+-/**
+- * Small native trampoline that launches the hosted YouTube player as a Trusted Web Activity.
+- * The actual player is rendered/networked by the device browser (normally Chrome), not WebView.
+- */
+-public final class TwaPlaybackActivity extends Activity {
+-    public static final String EXTRA_VIDEO_ID = "video_id";
+-    public static final String EXTRA_TITLE = "title";
+-    public static final String RESULT_WATCH_SECONDS = "watch_seconds";
+-
+-    private final Handler handler = new Handler(Looper.getMainLooper());
+-    private TwaLauncher twaLauncher;
+-    private boolean launched;
+-    private boolean browserTookFocus;
+-    private boolean finished;
+-    private long launchElapsed;
+-
+-    @Override protected void onCreate(Bundle savedInstanceState) {
+-        super.onCreate(savedInstanceState);
+-        getWindow().setStatusBarColor(Color.BLACK);
+-        getWindow().setNavigationBarColor(Color.BLACK);
+-        buildLoadingScreen();
+-
+-        String videoId = getIntent().getStringExtra(EXTRA_VIDEO_ID);
+-        if (videoId == null || !videoId.matches("^[A-Za-z0-9_-]{11}$")) {
+-            finishWithResult(0);
+-            return;
+-        }
+-
+-        Uri url = new Uri.Builder()
+-                .scheme("https")
+-                .authority("davidamerson.github.io")
+-                .path("kids-player.html")
+-                .appendQueryParameter("v", videoId)
+-                .appendQueryParameter("profile", AppProfile.isSon() ? "son" : "daughter")
+-                .build();
+-
+-        launchElapsed = SystemClock.elapsedRealtime();
+-        handler.post(() -> {
+-            if (isFinishing()) return;
+-            try {
+-                twaLauncher = new TwaLauncher(this);
+-                launched = true;
+-                twaLauncher.launch(url);
+-            } catch (Throwable t) {
+-                // Last-resort browser intent. It still keeps playback in the browser/VPN path, never WebView.
+-                try {
+-                    Intent browser = new Intent(Intent.ACTION_VIEW, url);
+-                    browser.addCategory(Intent.CATEGORY_BROWSABLE);
+-                    launched = true;
+-                    startActivity(browser);
+-                } catch (Throwable ignored) {
+-                    finishWithResult(0);
+-                }
+-            }
+-        });
+-    }
+-
+-    private void buildLoadingScreen() {
+-        LinearLayout root = new LinearLayout(this);
+-        root.setOrientation(LinearLayout.VERTICAL);
+-        root.setGravity(Gravity.CENTER);
+-        root.setBackgroundColor(Color.BLACK);
+-        ProgressBar progress = new ProgressBar(this);
+-        TextView text = new TextView(this);
+-        text.setText("Opening video…");
+-        text.setTextColor(Color.WHITE);
+-        text.setTextSize(18f);
+-        text.setPadding(0, 24, 0, 0);
+-        root.addView(progress, new LinearLayout.LayoutParams(72, 72));
+-        root.addView(text, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+-        setContentView(root);
+-    }
+-
+-    @Override protected void onPause() {
+-        super.onPause();
+-        if (launched) browserTookFocus = true;
+-    }
+-
+-    @Override protected void onResume() {
+-        super.onResume();
+-        if (launched && browserTookFocus && !finished) {
+-            // Returning from the browser/TWA. Give Android a moment so transient focus changes do not close early.
+-            handler.postDelayed(() -> {
+-                if (!isFinishing() && browserTookFocus) {
+-                    long seconds = Math.max(0, (SystemClock.elapsedRealtime() - launchElapsed) / 1000L);
+-                    finishWithResult(seconds);
+-                }
+-            }, 300);
+-        }
+-    }
+-
+-    private void finishWithResult(long seconds) {
+-        if (finished) return;
+-        finished = true;
+-        Intent result = new Intent();
+-        result.putExtra(RESULT_WATCH_SECONDS, seconds);
+-        setResult(RESULT_OK, result);
+-        finish();
+-    }
+-
+-    @Override public void onBackPressed() {
+-        finishWithResult(Math.max(0, (SystemClock.elapsedRealtime() - launchElapsed) / 1000L));
+-    }
+-
+-    @Override protected void onDestroy() {
+-        handler.removeCallbacksAndMessages(null);
+-        if (twaLauncher != null) {
+-            try { twaLauncher.destroy(); } catch (Throwable ignored) {}
+-        }
+-        super.onDestroy();
+-    }
+-}

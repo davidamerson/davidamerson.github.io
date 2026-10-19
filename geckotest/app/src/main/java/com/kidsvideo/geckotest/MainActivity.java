@@ -27,8 +27,10 @@ public final class MainActivity extends Activity {
     private GeckoSession session;
     private GeckoView geckoView;
     private TextView status;
+    private ProgressBar progress;
     private boolean watchLoaded;
     private boolean fullScreen;
+    private String currentTopUrl = "";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -46,7 +48,7 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
-        ProgressBar progress = new ProgressBar(this);
+        progress = new ProgressBar(this);
         FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(64, 64, Gravity.CENTER);
         root.addView(progress, pp);
 
@@ -73,33 +75,38 @@ public final class MainActivity extends Activity {
         session.setNavigationDelegate(new GeckoSession.NavigationDelegate() {
             @Override public GeckoResult<AllowOrDeny> onLoadRequest(
                     GeckoSession s, GeckoSession.NavigationDelegate.LoadRequest request) {
-                if (!watchLoaded || request.isDirectNavigation) {
+                // During initial startup YouTube may redirect between its own hosts.
+                if (!watchLoaded) {
                     return GeckoResult.fromValue(AllowOrDeny.ALLOW);
                 }
-                if (isSameVideoWatchUrl(request.uri)) {
-                    return GeckoResult.fromValue(AllowOrDeny.ALLOW);
-                }
-                return GeckoResult.fromValue(AllowOrDeny.DENY);
+                // Once our selected watch page has loaded, the child cannot navigate
+                // to another video, YouTube Home, Shorts, channels, search, or external sites.
+                return GeckoResult.fromValue(
+                        isSameVideoWatchUrl(request.uri) ? AllowOrDeny.ALLOW : AllowOrDeny.DENY);
             }
 
             @Override public GeckoResult<GeckoSession> onNewSession(GeckoSession s, String uri) {
+                // Never open popups/new tabs.
                 return null;
             }
         });
 
         session.setProgressDelegate(new GeckoSession.ProgressDelegate() {
             @Override public void onPageStart(GeckoSession s, String url) {
-                if (isSameVideoWatchUrl(url)) {
+                currentTopUrl = url == null ? "" : url;
+                if (isSameVideoWatchUrl(currentTopUrl)) {
                     status.setText("Loading video…");
                 }
             }
 
             @Override public void onPageStop(GeckoSession s, boolean success) {
-                if (success) {
+                if (success && isSameVideoWatchUrl(currentTopUrl)) {
                     watchLoaded = true;
                     status.setVisibility(View.GONE);
                     progress.setVisibility(View.GONE);
-                } else {
+                } else if (!success) {
+                    status.setVisibility(View.VISIBLE);
+                    progress.setVisibility(View.GONE);
                     status.setText("Page load failed — keep VPN on and try again.");
                 }
             }
@@ -108,7 +115,7 @@ public final class MainActivity extends Activity {
         session.setContentDelegate(new GeckoSession.ContentDelegate() {
             @Override public void onFullScreen(GeckoSession s, boolean enabled) {
                 fullScreen = enabled;
-                immersive(enabled);
+                immersive(true);
             }
         });
 
@@ -131,16 +138,14 @@ public final class MainActivity extends Activity {
             Uri u = Uri.parse(raw);
             String host = u.getHost();
             if (host == null || !(host.equals("youtube.com") || host.endsWith(".youtube.com"))) return false;
-            String path = u.getPath();
-            if (!"/watch".equals(path)) return false;
+            if (!"/watch".equals(u.getPath())) return false;
             return VIDEO_ID.equals(u.getQueryParameter("v"));
         } catch (Throwable ignored) {
             return false;
         }
     }
 
-    private void immersive(boolean hide) {
-        if (!hide) return;
+    private void immersive(boolean ignored) {
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |

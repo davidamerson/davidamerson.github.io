@@ -14,6 +14,7 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import org.mozilla.geckoview.AllowOrDeny;
+import org.mozilla.geckoview.GeckoPreferenceController;
 import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoSession;
@@ -53,10 +54,10 @@ public final class MainActivity extends Activity {
         root.addView(progress, pp);
 
         status = new TextView(this);
-        status.setText("Loading locked YouTube player…");
+        status.setText("QUIC-OFF TEST — disabling HTTP/3…");
         status.setTextColor(Color.WHITE);
         status.setTextSize(16f);
-        status.setBackgroundColor(0xAA000000);
+        status.setBackgroundColor(0xCC000000);
         status.setPadding(18, 10, 18, 10);
         FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -75,18 +76,14 @@ public final class MainActivity extends Activity {
         session.setNavigationDelegate(new GeckoSession.NavigationDelegate() {
             @Override public GeckoResult<AllowOrDeny> onLoadRequest(
                     GeckoSession s, GeckoSession.NavigationDelegate.LoadRequest request) {
-                // During initial startup YouTube may redirect between its own hosts.
                 if (!watchLoaded) {
                     return GeckoResult.fromValue(AllowOrDeny.ALLOW);
                 }
-                // Once our selected watch page has loaded, the child cannot navigate
-                // to another video, YouTube Home, Shorts, channels, search, or external sites.
                 return GeckoResult.fromValue(
                         isSameVideoWatchUrl(request.uri) ? AllowOrDeny.ALLOW : AllowOrDeny.DENY);
             }
 
             @Override public GeckoResult<GeckoSession> onNewSession(GeckoSession s, String uri) {
-                // Never open popups/new tabs.
                 return null;
             }
         });
@@ -95,7 +92,8 @@ public final class MainActivity extends Activity {
             @Override public void onPageStart(GeckoSession s, String url) {
                 currentTopUrl = url == null ? "" : url;
                 if (isSameVideoWatchUrl(currentTopUrl)) {
-                    status.setText("Loading video…");
+                    status.setVisibility(View.VISIBLE);
+                    status.setText("QUIC OFF — loading video over HTTP/2/TCP…");
                 }
             }
 
@@ -107,7 +105,7 @@ public final class MainActivity extends Activity {
                 } else if (!success) {
                     status.setVisibility(View.VISIBLE);
                     progress.setVisibility(View.GONE);
-                    status.setText("Page load failed — keep VPN on and try again.");
+                    status.setText("Page load failed. QUIC is OFF in this test.");
                 }
             }
         });
@@ -122,13 +120,34 @@ public final class MainActivity extends Activity {
         session.open(runtime);
         geckoView.setSession(session);
 
+        // This diagnostic intentionally changes only ONE networking variable:
+        // disable Gecko's HTTP/3 (QUIC) support. Everything else remains the
+        // same as the previous locked-browser test.
+        GeckoPreferenceController.setGeckoPref(
+                "network.http.http3.enable",
+                false,
+                GeckoPreferenceController.PREF_BRANCH_USER)
+                .accept(
+                        ignored -> {
+                            status.setVisibility(View.VISIBLE);
+                            status.setText("QUIC OFF confirmed — loading locked YouTube page…");
+                            installLockAndLoad();
+                        },
+                        error -> {
+                            progress.setVisibility(View.GONE);
+                            status.setVisibility(View.VISIBLE);
+                            status.setText("TEST INVALID: could not disable QUIC/HTTP3.");
+                        });
+    }
+
+    private void installLockAndLoad() {
         runtime.getWebExtensionController()
                 .ensureBuiltIn("resource://android/assets/kidslock/", "kidslock@example.com")
                 .accept(
                         extension -> session.loadUri(VIDEO_URL),
                         error -> {
-                            status.setText("Lock extension failed; loading test video anyway…");
-                            session.loadUri(VIDEO_URL);
+                            status.setText("QUIC OFF; lock extension failed — not loading test video.");
+                            progress.setVisibility(View.GONE);
                         });
     }
 

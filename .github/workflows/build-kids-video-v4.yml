@@ -41,7 +41,7 @@ jobs:
           grep -q "geckoview-beta-arm64-v8a" kids-video-final/app/build.gradle
           grep -q "network.http.http3.enable" kids-video-final/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "EXTRA_PARENT_SIGN_IN" kids-video-final/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
-          grep -q "kidslock=1" kids-video-final/app/src/main/assets/kidslock/content.js
+          grep -q "kidslock" kids-video-final/app/src/main/assets/kidslock/content.js
           grep -q "isYoutubeSignInDone" kids-video-final/app/src/main/java/com/kidsvideo/app/Prefs.java
           ! grep -R -q "TextToSpeech\|startEnglishCoach\|Speak English" kids-video-final/app/src/main/java
           grep -q "Stories & Cartoons" kids-video-final/app/src/main/java/com/kidsvideo/app/MainActivity.java

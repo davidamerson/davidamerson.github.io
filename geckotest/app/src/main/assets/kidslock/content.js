@@ -3,17 +3,28 @@
 
   const css = `
     html, body { margin:0 !important; padding:0 !important; background:#000 !important; overflow:hidden !important; width:100% !important; height:100% !important; }
+
+    /* Everything outside the selected video's player is hidden. */
     ytd-masthead, #masthead, #masthead-container, ytm-mobile-topbar-renderer,
     #secondary, #below, #related, #comments, ytd-comments, ytm-comments-entry-point-header-renderer,
     ytd-watch-next-secondary-results-renderer, ytm-watch-next-secondary-results-renderer,
     ytm-item-section-renderer, ytd-merch-shelf-renderer, #chat-container, #panels,
     ytd-watch-metadata, ytm-slim-video-metadata-section-renderer, ytm-video-with-context-renderer,
-    .ytp-ce-element, .ytp-endscreen-content, .ytp-suggested-action, .ytp-cards-teaser,
-    .ytp-cards-button, .ytp-paid-content-overlay, .ytp-title, .ytp-title-text,
-    .ytp-chrome-top, .ytp-watermark, .ytp-youtube-button, .ytp-impression-link,
-    .ytp-endscreen-previous, .ytp-endscreen-next, tp-yt-paper-dialog,
-    ytd-popup-container { display:none !important; visibility:hidden !important; pointer-events:none !important; }
+    ytd-popup-container, tp-yt-paper-dialog,
 
+    /* Recommendations/cards/links inside and after the player. */
+    .ytp-ce-element, .ytp-endscreen-content, .ytp-suggested-action,
+    .ytp-endscreen-previous, .ytp-endscreen-next,
+    .ytp-pause-overlay, .ytp-pause-overlay-container,
+    .ytp-cards-teaser, .ytp-cards-button,
+    .ytp-title, .ytp-title-text, .ytp-title-link,
+    .ytp-chrome-top, .ytp-watermark, .ytp-youtube-button, .ytp-impression-link {
+      display:none !important;
+      visibility:hidden !important;
+      pointer-events:none !important;
+    }
+
+    /* Keep the actual YouTube player and its basic controls filling our app window. */
     .html5-video-player {
       position:fixed !important;
       inset:0 !important;
@@ -31,10 +42,13 @@
     }
   `;
 
-  const style = document.createElement('style');
-  style.id = 'kids-lock-style';
-  style.textContent = css;
-  (document.documentElement || document.head).appendChild(style);
+  function ensureStyle() {
+    if (document.getElementById('kids-lock-style')) return;
+    const style = document.createElement('style');
+    style.id = 'kids-lock-style';
+    style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+  }
 
   let boundVideo = null;
 
@@ -45,25 +59,29 @@
     }
   }
 
+  function hideRecommendations() {
+    document.querySelectorAll(
+      '.ytp-ce-element,.ytp-endscreen-content,.ytp-suggested-action,' +
+      '.ytp-endscreen-previous,.ytp-endscreen-next,.ytp-pause-overlay,' +
+      '.ytp-pause-overlay-container,.ytp-cards-teaser,.ytp-cards-button'
+    ).forEach(el => {
+      el.style.setProperty('display','none','important');
+      el.style.setProperty('pointer-events','none','important');
+    });
+  }
+
   function bindVideo(video) {
     if (!video || video === boundVideo) return;
     boundVideo = video;
     video.autoplay = false;
     video.addEventListener('ended', () => {
       try { video.pause(); } catch (_) {}
-      hideEndscreen();
+      hideRecommendations();
     }, true);
   }
 
-  function hideEndscreen() {
-    document.querySelectorAll('.ytp-ce-element,.ytp-endscreen-content,.ytp-suggested-action,.ytp-endscreen-previous,.ytp-endscreen-next')
-      .forEach(el => { el.style.setProperty('display','none','important'); });
-  }
-
   function lockPage() {
-    if (!document.getElementById('kids-lock-style')) {
-      (document.documentElement || document.head).appendChild(style.cloneNode(true));
-    }
+    ensureStyle();
     const player = document.querySelector('.html5-video-player');
     if (player) {
       player.style.setProperty('position','fixed','important');
@@ -75,19 +93,28 @@
     }
     bindVideo(document.querySelector('video.html5-main-video, video'));
     disableAutoplay();
-    hideEndscreen();
+    hideRecommendations();
   }
 
+  /* Only ordinary player controls are clickable. Everything that tries to
+     navigate elsewhere is blocked before YouTube can act on it. */
   document.addEventListener('click', ev => {
-    const player = ev.target && ev.target.closest ? ev.target.closest('.html5-video-player') : null;
+    const closest = ev.target && ev.target.closest ? ev.target.closest.bind(ev.target) : null;
+    if (!closest) return;
+
+    const player = closest('.html5-video-player');
     if (!player) {
       ev.preventDefault();
       ev.stopImmediatePropagation();
       return;
     }
-    const link = ev.target.closest && ev.target.closest('a[href]');
-    const youtubeJump = ev.target.closest && ev.target.closest('.ytp-youtube-button,.ytp-title-link,.ytp-watermark');
-    if (link || youtubeJump) {
+
+    const navigationTarget = closest(
+      'a[href],.ytp-youtube-button,.ytp-title-link,.ytp-watermark,' +
+      '.ytp-ce-element,.ytp-suggested-action,.ytp-cards-button,' +
+      '.ytp-endscreen-previous,.ytp-endscreen-next'
+    );
+    if (navigationTarget) {
       ev.preventDefault();
       ev.stopImmediatePropagation();
     }
@@ -99,9 +126,8 @@
   }, true);
 
   const observer = new MutationObserver(lockPage);
-  observer.observe(document.documentElement, {subtree:true, childList:true, attributes:false});
-
+  observer.observe(document.documentElement, {subtree:true, childList:true});
   window.addEventListener('load', lockPage, true);
   document.addEventListener('DOMContentLoaded', lockPage, true);
-  setInterval(lockPage, 1000);
+  setInterval(lockPage, 750);
 })();

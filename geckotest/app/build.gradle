@@ -8,10 +8,10 @@ android {
 
     defaultConfig {
         applicationId 'com.kidsvideo.geckotest'
-        minSdk 24
+        minSdk 26
         targetSdk 36
-        versionCode 3
-        versionName '1.2'
+        versionCode 4
+        versionName '1.3'
     }
 
     compileOptions {

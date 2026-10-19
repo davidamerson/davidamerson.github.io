@@ -31,13 +31,13 @@ jobs:
       - name: Package output
         run: |
           mkdir -p dist
-          cp geckotest/app/build/outputs/apk/debug/app-debug.apk dist/Kids-Locked-Browser-Test.apk
-          sha256sum dist/Kids-Locked-Browser-Test.apk > dist/SHA256SUMS.txt
-          keytool -printcert -jarfile dist/Kids-Locked-Browser-Test.apk > dist/SIGNING-CERT.txt
+          cp geckotest/app/build/outputs/apk/debug/app-debug.apk dist/Kids-Parent-SignIn-QUIC-OFF-Test.apk
+          sha256sum dist/Kids-Parent-SignIn-QUIC-OFF-Test.apk > dist/SHA256SUMS.txt
+          keytool -printcert -jarfile dist/Kids-Parent-SignIn-QUIC-OFF-Test.apk > dist/SIGNING-CERT.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kids-geckoview-test-apk
+          name: kids-parent-signin-quic-off-test
           path: dist/
           if-no-files-found: error
           retention-days: 30

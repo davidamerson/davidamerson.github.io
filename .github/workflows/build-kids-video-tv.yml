@@ -1,0 +1,108 @@
+name: Build Kids Video TV APKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-tv-final" ]
+    paths:
+      - "final-source-parts/**"
+      - ".github/workflows/build-kids-video-tv.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Restore and convert final source to TV-only ARMv7
+        run: |
+          rm -rf kids-video-tv
+          mkdir -p kids-video-tv
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-final-source.tar.gz
+          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-final-source.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kids-video-final-source.tar.gz -C kids-video-tv
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('kids-video-tv')
+          gradle = root / 'app/build.gradle'
+          text = gradle.read_text()
+          text = text.replace("versionCode 80000", "versionCode 81000")
+          text = text.replace("versionName '8.0.0'", "versionName '8.1.0-tv'")
+          text = text.replace("applicationIdSuffix '.daughter'", "applicationIdSuffix '.daughter.tv'")
+          text = text.replace("applicationIdSuffix '.son'", "applicationIdSuffix '.son.tv'")
+          text = text.replace("resValue 'string', 'app_name', 'Daughter Video'", "resValue 'string', 'app_name', 'Daughter Video TV'")
+          text = text.replace("resValue 'string', 'app_name', 'Son Video'", "resValue 'string', 'app_name', 'Son Video TV'")
+          text = text.replace("implementation 'org.mozilla.geckoview:geckoview-beta-arm64-v8a:148.0.20260204091025'", "implementation 'org.mozilla.geckoview:geckoview-beta-armeabi-v7a:148.0.20260204091025'")
+          text = text.replace("targetSdk 36\n        versionCode", "targetSdk 36\n        ndk { abiFilters 'armeabi-v7a' }\n        versionCode")
+          gradle.write_text(text)
+
+          settings = root / 'settings.gradle'
+          s = settings.read_text()
+          if 'maven.mozilla.org' not in s:
+              s = s.replace('mavenCentral()', "mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }")
+          settings.write_text(s)
+
+          manifest = root / 'app/src/main/AndroidManifest.xml'
+          m = manifest.read_text()
+          m = m.replace('android.software.leanback" android:required="false"', 'android.software.leanback" android:required="true"')
+          m = m.replace('android:name=".BrowserPlaybackActivity"\n            android:configChanges=', 'android:name=".BrowserPlaybackActivity"\n            android:screenOrientation="landscape"\n            android:configChanges=')
+          m = m.replace('android:name=".MainActivity"\n            android:configChanges=', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"\n            android:configChanges=')
+          # Remove the ordinary phone launcher filter; keep LEANBACK_LAUNCHER only.
+          phone_filter = '''            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n'''
+          m = m.replace(phone_filter, '')
+          manifest.write_text(m)
+          PY
+          grep -q "versionName '8.1.0-tv'" kids-video-tv/app/build.gradle
+          grep -q "geckoview-beta-armeabi-v7a" kids-video-tv/app/build.gradle
+          grep -q "abiFilters 'armeabi-v7a'" kids-video-tv/app/build.gradle
+          grep -q "applicationIdSuffix '.daughter.tv'" kids-video-tv/app/build.gradle
+          grep -q "applicationIdSuffix '.son.tv'" kids-video-tv/app/build.gradle
+          grep -q 'android.software.leanback" android:required="true"' kids-video-tv/app/src/main/AndroidManifest.xml
+          grep -q 'android.intent.category.LEANBACK_LAUNCHER' kids-video-tv/app/src/main/AndroidManifest.xml
+          ! grep -q 'android.intent.category.LAUNCHER' kids-video-tv/app/src/main/AndroidManifest.xml
+          grep -q 'android:screenOrientation="landscape"' kids-video-tv/app/src/main/AndroidManifest.xml
+          grep -q "network.http.http3.enable" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "EXTRA_PARENT_SIGN_IN" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "kidslock" kids-video-tv/app/src/main/assets/kidslock/content.js
+          ! grep -R -q "TextToSpeech\|startEnglishCoach\|Speak English" kids-video-tv/app/src/main/java
+
+      - name: Build TV Daughter and Son APKs
+        working-directory: kids-video-tv
+        run: gradle --no-daemon --stacktrace :app:assembleDaughterDebug :app:assembleSonDebug
+
+      - name: Verify ARMv7-only TV APKs
+        run: |
+          mkdir -p dist
+          cp kids-video-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-TV.apk
+          cp kids-video-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-TV.apk
+          test -s dist/Daughter-Video-TV.apk
+          test -s dist/Son-Video-TV.apk
+          unzip -t dist/Daughter-Video-TV.apk >/dev/null
+          unzip -t dist/Son-Video-TV.apk >/dev/null
+          unzip -l dist/Daughter-Video-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          unzip -l dist/Son-Video-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          if unzip -l dist/Daughter-Video-TV.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Daughter TV APK'; exit 1; fi
+          if unzip -l dist/Son-Video-TV.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Son TV APK'; exit 1; fi
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+          keytool -printcert -jarfile dist/Daughter-Video-TV.apk > dist/SIGNING-CERT-Daughter-TV.txt
+          keytool -printcert -jarfile dist/Son-Video-TV.apk > dist/SIGNING-CERT-Son-TV.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-TV-Source.tar.gz -C kids-video-tv .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kids-video-tv-apks
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

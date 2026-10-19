@@ -1,18 +1,23 @@
 (() => {
   'use strict';
 
+  // Parent sign-in pages and ordinary YouTube pages must remain untouched.
+  // The lock activates only for the exact video URL launched by the app.
+  let locked = false;
+  try {
+    locked = new URL(location.href).searchParams.get('kidslock') === '1';
+  } catch (_) {}
+  if (!locked) return;
+
   const css = `
     html, body { margin:0 !important; padding:0 !important; background:#000 !important; overflow:hidden !important; width:100% !important; height:100% !important; }
 
-    /* Everything outside the selected video's player is hidden. */
     ytd-masthead, #masthead, #masthead-container, ytm-mobile-topbar-renderer,
     #secondary, #below, #related, #comments, ytd-comments, ytm-comments-entry-point-header-renderer,
     ytd-watch-next-secondary-results-renderer, ytm-watch-next-secondary-results-renderer,
     ytm-item-section-renderer, ytd-merch-shelf-renderer, #chat-container, #panels,
     ytd-watch-metadata, ytm-slim-video-metadata-section-renderer, ytm-video-with-context-renderer,
     ytd-popup-container, tp-yt-paper-dialog,
-
-    /* Recommendations/cards/links inside and after the player. */
     .ytp-ce-element, .ytp-endscreen-content, .ytp-suggested-action,
     .ytp-endscreen-previous, .ytp-endscreen-next,
     .ytp-pause-overlay, .ytp-pause-overlay-container,
@@ -24,7 +29,6 @@
       pointer-events:none !important;
     }
 
-    /* Keep the actual YouTube player and its basic controls filling our app window. */
     .html5-video-player {
       position:fixed !important;
       inset:0 !important;
@@ -96,8 +100,6 @@
     hideRecommendations();
   }
 
-  /* Only ordinary player controls are clickable. Everything that tries to
-     navigate elsewhere is blocked before YouTube can act on it. */
   document.addEventListener('click', ev => {
     const closest = ev.target && ev.target.closest ? ev.target.closest.bind(ev.target) : null;
     if (!closest) return;

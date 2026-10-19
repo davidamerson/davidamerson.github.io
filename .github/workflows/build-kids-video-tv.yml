@@ -23,13 +23,20 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
-          key: kids-video-tv-debug-keystore-v1
+          key: kids-video-tv-debug-keystore-v2
+
+      - name: Ensure stable TV signing key
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
 
-      - name: Restore and convert final source to TV-only ARMv7 with remote controls
+      - name: Restore and convert final source to TV-only ARMv7 with remote controls and focus highlight
         run: |
           rm -rf kids-video-tv
           mkdir -p kids-video-tv
@@ -42,8 +49,8 @@ jobs:
           root = Path('kids-video-tv')
           gradle = root / 'app/build.gradle'
           text = gradle.read_text()
-          text = text.replace("versionCode 80000", "versionCode 82000")
-          text = text.replace("versionName '8.0.0'", "versionName '8.2.0-tv'")
+          text = text.replace("versionCode 80000", "versionCode 83000")
+          text = text.replace("versionName '8.0.0'", "versionName '8.3.0-tv'")
           text = text.replace("applicationIdSuffix '.daughter'", "applicationIdSuffix '.daughter.tv'")
           text = text.replace("applicationIdSuffix '.son'", "applicationIdSuffix '.son.tv'")
           text = text.replace("resValue 'string', 'app_name', 'Daughter Video'", "resValue 'string', 'app_name', 'Daughter Video TV'")
@@ -71,26 +78,69 @@ jobs:
           java = root / 'app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java'
           j = java.read_text()
           j = j.replace('import android.view.Gravity;\n', 'import android.view.Gravity;\nimport android.view.KeyEvent;\nimport android.view.MotionEvent;\n')
-          j = j.replace('        geckoView.setSession(session);\n', '''        geckoView.setSession(session);\n\n        // Android TV / Google TV remotes send D-pad key events rather than touch.\n        // Keep GeckoView focused so Arrow keys reach the child-safe player script.\n        geckoView.setFocusable(true);\n        geckoView.setFocusableInTouchMode(true);\n        geckoView.requestFocus();\n''')
+          j = j.replace('        geckoView.setSession(session);\n', '''        geckoView.setSession(session);\n\n        geckoView.setFocusable(true);\n        geckoView.setFocusableInTouchMode(true);\n        geckoView.requestFocus();\n''')
           marker = '    private void immersive(boolean hide) {'
-          remote_methods = '''    @Override public boolean dispatchKeyEvent(KeyEvent event) {\n        if (!parentMode && geckoView != null &&\n                event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {\n            int key = event.getKeyCode();\n            if (key == KeyEvent.KEYCODE_DPAD_CENTER ||\n                    key == KeyEvent.KEYCODE_ENTER ||\n                    key == KeyEvent.KEYCODE_NUMPAD_ENTER ||\n                    key == KeyEvent.KEYCODE_SPACE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY ||\n                    key == KeyEvent.KEYCODE_MEDIA_PAUSE) {\n                // A real mouse click on the centre Play button is already proven to work\n                // on this TV box. Reproduce that exact user gesture for the remote OK key.\n                tapPlayerCenter();\n                return true;\n            }\n        }\n        return super.dispatchKeyEvent(event);\n    }\n\n    private void tapPlayerCenter() {\n        if (geckoView == null || geckoView.getWidth() <= 0 || geckoView.getHeight() <= 0) return;\n        geckoView.requestFocus();\n        long now = SystemClock.uptimeMillis();\n        float x = geckoView.getWidth() / 2f;\n        float y = geckoView.getHeight() / 2f;\n        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);\n        MotionEvent up = MotionEvent.obtain(now, now + 70, MotionEvent.ACTION_UP, x, y, 0);\n        try {\n            geckoView.dispatchTouchEvent(down);\n            geckoView.dispatchTouchEvent(up);\n        } finally {\n            down.recycle();\n            up.recycle();\n        }\n    }\n\n'''
+          remote_methods = '''    @Override public boolean dispatchKeyEvent(KeyEvent event) {\n        if (!parentMode && geckoView != null &&\n                event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {\n            int key = event.getKeyCode();\n            if (key == KeyEvent.KEYCODE_DPAD_CENTER ||\n                    key == KeyEvent.KEYCODE_ENTER ||\n                    key == KeyEvent.KEYCODE_NUMPAD_ENTER ||\n                    key == KeyEvent.KEYCODE_SPACE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY ||\n                    key == KeyEvent.KEYCODE_MEDIA_PAUSE) {\n                tapPlayerCenter();\n                return true;\n            }\n        }\n        return super.dispatchKeyEvent(event);\n    }\n\n    private void tapPlayerCenter() {\n        if (geckoView == null || geckoView.getWidth() <= 0 || geckoView.getHeight() <= 0) return;\n        geckoView.requestFocus();\n        long now = SystemClock.uptimeMillis();\n        float x = geckoView.getWidth() / 2f;\n        float y = geckoView.getHeight() / 2f;\n        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);\n        MotionEvent up = MotionEvent.obtain(now, now + 70, MotionEvent.ACTION_UP, x, y, 0);\n        try {\n            geckoView.dispatchTouchEvent(down);\n            geckoView.dispatchTouchEvent(up);\n        } finally {\n            down.recycle();\n            up.recycle();\n        }\n    }\n\n'''
           if marker not in j:
               raise SystemExit('Could not find immersive method marker')
           j = j.replace(marker, remote_methods + marker)
           java.write_text(j)
 
-          # Capture remote Arrow keys inside the locked YouTube page. This gives
-          # direct TV-style seeking even when YouTube's own controls do not have focus.
+          # Remote arrow-key support inside the locked YouTube page.
           js = root / 'app/src/main/assets/kidslock/content.js'
           c = js.read_text()
-          remote_js = r'''\n\n  function tvVideo() {\n    return document.querySelector('video.html5-main-video, video');\n  }\n\n  function revealTvControls() {\n    const player = document.querySelector('.html5-video-player');\n    if (!player) return;\n    try {\n      player.classList.remove('ytp-autohide');\n      player.classList.add('ytp-user-active');\n      player.dispatchEvent(new MouseEvent('mousemove', {\n        bubbles:true, clientX:Math.floor(innerWidth / 2), clientY:Math.floor(innerHeight / 2)\n      }));\n    } catch (_) {}\n  }\n\n  document.addEventListener('keydown', ev => {\n    const video = tvVideo();\n    if (!video) return;\n    const key = ev.key || '';\n\n    if (key === 'ArrowLeft') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.currentTime = Math.max(0, video.currentTime - 10); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'ArrowRight') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.currentTime = Math.min(isFinite(video.duration) ? video.duration : video.currentTime + 10, video.currentTime + 10); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'ArrowUp' || key === 'ArrowDown') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      revealTvControls();\n      return;\n    }\n    if (key === 'MediaPlay') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.play(); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'MediaPause') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.pause(); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'MediaPlayPause' || key === ' ' || key === 'Enter') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.paused ? video.play() : video.pause(); } catch (_) {}\n      revealTvControls();\n    }\n  }, true);\n'''
+          remote_js = r'''\n\n  function tvVideo() { return document.querySelector('video.html5-main-video, video'); }\n  function revealTvControls() {\n    const player = document.querySelector('.html5-video-player');\n    if (!player) return;\n    try {\n      player.classList.remove('ytp-autohide');\n      player.classList.add('ytp-user-active');\n      player.dispatchEvent(new MouseEvent('mousemove', {bubbles:true, clientX:Math.floor(innerWidth / 2), clientY:Math.floor(innerHeight / 2)}));\n    } catch (_) {}\n  }\n  document.addEventListener('keydown', ev => {\n    const video = tvVideo(); if (!video) return; const key = ev.key || '';\n    if (key === 'ArrowLeft') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.currentTime = Math.max(0, video.currentTime - 10); } catch (_) {} revealTvControls(); return; }\n    if (key === 'ArrowRight') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.currentTime = Math.min(isFinite(video.duration) ? video.duration : video.currentTime + 10, video.currentTime + 10); } catch (_) {} revealTvControls(); return; }\n    if (key === 'ArrowUp' || key === 'ArrowDown') { ev.preventDefault(); ev.stopImmediatePropagation(); revealTvControls(); return; }\n    if (key === 'MediaPlay') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.play(); } catch (_) {} revealTvControls(); return; }\n    if (key === 'MediaPause') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.pause(); } catch (_) {} revealTvControls(); return; }\n    if (key === 'MediaPlayPause' || key === ' ' || key === 'Enter') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.paused ? video.play() : video.pause(); } catch (_) {} revealTvControls(); }\n  }, true);\n'''
           close = '\n})();\n'
           if close not in c:
               raise SystemExit('Could not find kidslock script end')
           c = c.replace(close, remote_js + close)
           js.write_text(c)
+
+          # Strong TV focus indicator for video cards.
+          va = root / 'app/src/main/java/com/kidsvideo/app/VideoAdapter.java'
+          v = va.read_text()
+          badge_anchor = '''            card.addView(h.star, sp);\n\n            card.setTag(h);'''
+          badge_block = '''            card.addView(h.star, sp);\n\n            h.focusBadge = new TextView(context);\n            h.focusBadge.setText("SELECTED");\n            h.focusBadge.setTextColor(Color.BLACK);\n            h.focusBadge.setTextSize(tv ? 13f : 11f);\n            h.focusBadge.setTypeface(null, android.graphics.Typeface.BOLD);\n            h.focusBadge.setGravity(Gravity.CENTER);\n            h.focusBadge.setPadding(dp(10), dp(3), dp(10), dp(3));\n            h.focusBadge.setFocusable(false);\n            h.focusBadge.setClickable(false);\n            GradientDrawable focusBadgeBg = new GradientDrawable();\n            focusBadgeBg.setColor(Color.rgb(255, 214, 64));\n            focusBadgeBg.setCornerRadius(dp(13));\n            focusBadgeBg.setStroke(dp(1), Color.WHITE);\n            h.focusBadge.setBackground(focusBadgeBg);\n            h.focusBadge.setVisibility(View.GONE);\n            FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(34), Gravity.TOP | Gravity.START);\n            fp.setMargins(dp(10), dp(10), 0, 0);\n            card.addView(h.focusBadge, fp);\n\n            card.setTag(h);'''
+          if badge_anchor not in v:
+              raise SystemExit('VideoAdapter badge anchor not found')
+          v = v.replace(badge_anchor, badge_block)
+
+          old_focus = '''        convertView.setOnFocusChangeListener((v, hasFocus) -> {\n            v.setBackground(cardBackground(hasFocus));\n            v.setScaleX(hasFocus ? 1.035f : 1f);\n            v.setScaleY(hasFocus ? 1.035f : 1f);\n            v.setElevation(hasFocus ? dp(9) : dp(1));\n        });'''
+          new_focus = '''        final Holder holder = h;\n        convertView.setOnFocusChangeListener((v, hasFocus) -> applyFocusStyle(v, holder, hasFocus));\n        applyFocusStyle(convertView, h, convertView.hasFocus());'''
+          if old_focus not in v:
+              raise SystemExit('VideoAdapter focus listener anchor not found')
+          v = v.replace(old_focus, new_focus)
+
+          shutdown_anchor = '    void shutdown() { imagePool.shutdownNow(); }\n'
+          focus_method = '''    private void applyFocusStyle(View v, Holder h, boolean hasFocus) {\n        v.setBackground(cardBackground(hasFocus));\n        float scale = hasFocus ? (tv ? 1.075f : 1.035f) : 1f;\n        v.animate().scaleX(scale).scaleY(scale).setDuration(tv ? 110 : 80).start();\n        v.setElevation(hasFocus ? dp(tv ? 18 : 9) : dp(1));\n        v.setAlpha(tv && !hasFocus ? 0.88f : 1f);\n        if (h.focusBadge != null) h.focusBadge.setVisibility(tv && hasFocus ? View.VISIBLE : View.GONE);\n        h.title.setTextColor(tv && hasFocus ? Color.rgb(255, 224, 92) : Color.WHITE);\n        h.title.setTypeface(null, tv && hasFocus ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);\n        h.meta.setTextColor(tv && hasFocus ? Color.WHITE : Color.rgb(185, 188, 196));\n    }\n\n    void shutdown() { imagePool.shutdownNow(); }\n'''
+          if shutdown_anchor not in v:
+              raise SystemExit('VideoAdapter shutdown anchor not found')
+          v = v.replace(shutdown_anchor, focus_method)
+
+          old_bg = '''        g.setColor(focused ? Color.rgb(40, 58, 92) : Color.rgb(30, 31, 36));\n        g.setCornerRadius(dp(12));\n        g.setStroke(dp(focused ? 3 : 1), focused ? Color.rgb(105, 170, 255) : Color.rgb(62, 64, 73));'''
+          new_bg = '''        g.setColor(focused ? (tv ? Color.rgb(24, 52, 92) : Color.rgb(40, 58, 92)) : Color.rgb(30, 31, 36));\n        g.setCornerRadius(dp(12));\n        int stroke = focused ? (tv ? 5 : 3) : 1;\n        int strokeColor = focused ? (tv ? Color.rgb(255, 214, 64) : Color.rgb(105, 170, 255)) : Color.rgb(62, 64, 73);\n        g.setStroke(dp(stroke), strokeColor);'''
+          if old_bg not in v:
+              raise SystemExit('VideoAdapter background anchor not found')
+          v = v.replace(old_bg, new_bg)
+
+          holder_anchor = '''        TextView meta;\n        TextView star;'''
+          holder_repl = '''        TextView meta;\n        TextView star;\n        TextView focusBadge;'''
+          if holder_anchor not in v:
+              raise SystemExit('VideoAdapter holder anchor not found')
+          v = v.replace(holder_anchor, holder_repl)
+          va.write_text(v)
+
+          # Make top/menu/category controls visibly move when remote focus lands on them.
+          ma = root / 'app/src/main/java/com/kidsvideo/app/MainActivity.java'
+          q = ma.read_text()
+          old_button = '''        b.setText(text); b.setTextColor(Color.WHITE); b.setTextSize(tv ? 15f : 13f); b.setAllCaps(false); b.setFocusable(true);\n        return b;'''
+          new_button = '''        b.setText(text); b.setTextColor(Color.WHITE); b.setTextSize(tv ? 15f : 13f); b.setAllCaps(false); b.setFocusable(true);\n        if (tv) b.setOnFocusChangeListener((v, hasFocus) -> {\n            float s = hasFocus ? 1.08f : 1f;\n            v.animate().scaleX(s).scaleY(s).setDuration(100).start();\n            v.setAlpha(hasFocus ? 1f : 0.88f);\n            v.setElevation(hasFocus ? dp(10) : dp(1));\n        });\n        return b;'''
+          if old_button not in q:
+              raise SystemExit('MainActivity button anchor not found')
+          q = q.replace(old_button, new_button)
+          ma.write_text(q)
           PY
-          grep -q "versionName '8.2.0-tv'" kids-video-tv/app/build.gradle
+          grep -q "versionName '8.3.0-tv'" kids-video-tv/app/build.gradle
           grep -q "geckoview-beta-armeabi-v7a" kids-video-tv/app/build.gradle
           grep -q "abiFilters 'armeabi-v7a'" kids-video-tv/app/build.gradle
           grep -q "applicationIdSuffix '.daughter.tv'" kids-video-tv/app/build.gradle
@@ -102,7 +152,10 @@ jobs:
           grep -q "KEYCODE_DPAD_CENTER" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "tapPlayerCenter" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "ArrowLeft" kids-video-tv/app/src/main/assets/kidslock/content.js
-          grep -q "ArrowRight" kids-video-tv/app/src/main/assets/kidslock/content.js
+          grep -q "SELECTED" kids-video-tv/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
+          grep -q "1.075f" kids-video-tv/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
+          grep -q "255, 214, 64" kids-video-tv/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
+          grep -q "1.08f" kids-video-tv/app/src/main/java/com/kidsvideo/app/MainActivity.java
           grep -q "network.http.http3.enable" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "EXTRA_PARENT_SIGN_IN" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           ! grep -R -q "TextToSpeech\|startEnglishCoach\|Speak English" kids-video-tv/app/src/main/java
@@ -114,24 +167,24 @@ jobs:
       - name: Verify ARMv7-only TV APKs
         run: |
           mkdir -p dist
-          cp kids-video-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-TV-v8.2.apk
-          cp kids-video-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-TV-v8.2.apk
-          test -s dist/Daughter-Video-TV-v8.2.apk
-          test -s dist/Son-Video-TV-v8.2.apk
-          unzip -t dist/Daughter-Video-TV-v8.2.apk >/dev/null
-          unzip -t dist/Son-Video-TV-v8.2.apk >/dev/null
-          unzip -l dist/Daughter-Video-TV-v8.2.apk | grep -q 'lib/armeabi-v7a/libxul.so'
-          unzip -l dist/Son-Video-TV-v8.2.apk | grep -q 'lib/armeabi-v7a/libxul.so'
-          if unzip -l dist/Daughter-Video-TV-v8.2.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Daughter TV APK'; exit 1; fi
-          if unzip -l dist/Son-Video-TV-v8.2.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Son TV APK'; exit 1; fi
+          cp kids-video-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-TV-v8.3.apk
+          cp kids-video-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-TV-v8.3.apk
+          test -s dist/Daughter-Video-TV-v8.3.apk
+          test -s dist/Son-Video-TV-v8.3.apk
+          unzip -t dist/Daughter-Video-TV-v8.3.apk >/dev/null
+          unzip -t dist/Son-Video-TV-v8.3.apk >/dev/null
+          unzip -l dist/Daughter-Video-TV-v8.3.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          unzip -l dist/Son-Video-TV-v8.3.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          if unzip -l dist/Daughter-Video-TV-v8.3.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Daughter TV APK'; exit 1; fi
+          if unzip -l dist/Son-Video-TV-v8.3.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Son TV APK'; exit 1; fi
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          keytool -printcert -jarfile dist/Daughter-Video-TV-v8.2.apk > dist/SIGNING-CERT-Daughter-TV.txt
-          keytool -printcert -jarfile dist/Son-Video-TV-v8.2.apk > dist/SIGNING-CERT-Son-TV.txt
-          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-TV-v8.2-Source.tar.gz -C kids-video-tv .
+          keytool -printcert -jarfile dist/Daughter-Video-TV-v8.3.apk > dist/SIGNING-CERT-Daughter-TV.txt
+          keytool -printcert -jarfile dist/Son-Video-TV-v8.3.apk > dist/SIGNING-CERT-Son-TV.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-TV-v8.3-Source.tar.gz -C kids-video-tv .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kids-video-tv-v8.2-apks
+          name: kids-video-tv-v8.3-apks
           path: dist/
           if-no-files-found: error
           retention-days: 30

@@ -1,0 +1,19 @@
+name: Inspect Kids TV source
+on:
+  push:
+    branches: [ "kids-video-tv-final" ]
+    paths: [ ".github/workflows/inspect-kids-tv-source.yml" ]
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Extract and print relevant source
+        run: |
+          mkdir -p /tmp/kids-src
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-final-source.tar.gz
+          tar -xzf /tmp/kids-video-final-source.tar.gz -C /tmp/kids-src
+          echo '===== VideoAdapter.java ====='
+          sed -n '1,320p' /tmp/kids-src/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
+          echo '===== MainActivity focus-related ====='
+          grep -n -C 4 -E 'setOnFocusChangeListener|focus|RecyclerView|Button|category|chip' /tmp/kids-src/app/src/main/java/com/kidsvideo/app/MainActivity.java | head -n 420

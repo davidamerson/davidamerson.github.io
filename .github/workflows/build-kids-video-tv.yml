@@ -20,11 +20,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: kids-video-tv-debug-keystore-v1
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
 
-      - name: Restore and convert final source to TV-only ARMv7
+      - name: Restore and convert final source to TV-only ARMv7 with remote controls
         run: |
           rm -rf kids-video-tv
           mkdir -p kids-video-tv
@@ -33,13 +38,12 @@ jobs:
           tar -xzf /tmp/kids-video-final-source.tar.gz -C kids-video-tv
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           root = Path('kids-video-tv')
           gradle = root / 'app/build.gradle'
           text = gradle.read_text()
-          text = text.replace("versionCode 80000", "versionCode 81000")
-          text = text.replace("versionName '8.0.0'", "versionName '8.1.0-tv'")
+          text = text.replace("versionCode 80000", "versionCode 82000")
+          text = text.replace("versionName '8.0.0'", "versionName '8.2.0-tv'")
           text = text.replace("applicationIdSuffix '.daughter'", "applicationIdSuffix '.daughter.tv'")
           text = text.replace("applicationIdSuffix '.son'", "applicationIdSuffix '.son.tv'")
           text = text.replace("resValue 'string', 'app_name', 'Daughter Video'", "resValue 'string', 'app_name', 'Daughter Video TV'")
@@ -59,12 +63,32 @@ jobs:
           m = m.replace('android.software.leanback" android:required="false"', 'android.software.leanback" android:required="true"')
           m = m.replace('android:name=".BrowserPlaybackActivity"\n            android:configChanges=', 'android:name=".BrowserPlaybackActivity"\n            android:screenOrientation="landscape"\n            android:configChanges=')
           m = m.replace('android:name=".MainActivity"\n            android:configChanges=', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"\n            android:configChanges=')
-          # Remove the ordinary phone launcher filter; keep LEANBACK_LAUNCHER only.
           phone_filter = '''            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n'''
           m = m.replace(phone_filter, '')
           manifest.write_text(m)
+
+          # TV remote support in Gecko playback activity.
+          java = root / 'app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java'
+          j = java.read_text()
+          j = j.replace('import android.view.Gravity;\n', 'import android.view.Gravity;\nimport android.view.KeyEvent;\nimport android.view.MotionEvent;\n')
+          j = j.replace('        geckoView.setSession(session);\n', '''        geckoView.setSession(session);\n\n        // Android TV / Google TV remotes send D-pad key events rather than touch.\n        // Keep GeckoView focused so Arrow keys reach the child-safe player script.\n        geckoView.setFocusable(true);\n        geckoView.setFocusableInTouchMode(true);\n        geckoView.requestFocus();\n''')
+          marker = '    private void immersive(boolean hide) {'
+          remote_methods = '''    @Override public boolean dispatchKeyEvent(KeyEvent event) {\n        if (!parentMode && geckoView != null &&\n                event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {\n            int key = event.getKeyCode();\n            if (key == KeyEvent.KEYCODE_DPAD_CENTER ||\n                    key == KeyEvent.KEYCODE_ENTER ||\n                    key == KeyEvent.KEYCODE_NUMPAD_ENTER ||\n                    key == KeyEvent.KEYCODE_SPACE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY ||\n                    key == KeyEvent.KEYCODE_MEDIA_PAUSE) {\n                // A real mouse click on the centre Play button is already proven to work\n                // on this TV box. Reproduce that exact user gesture for the remote OK key.\n                tapPlayerCenter();\n                return true;\n            }\n        }\n        return super.dispatchKeyEvent(event);\n    }\n\n    private void tapPlayerCenter() {\n        if (geckoView == null || geckoView.getWidth() <= 0 || geckoView.getHeight() <= 0) return;\n        geckoView.requestFocus();\n        long now = SystemClock.uptimeMillis();\n        float x = geckoView.getWidth() / 2f;\n        float y = geckoView.getHeight() / 2f;\n        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);\n        MotionEvent up = MotionEvent.obtain(now, now + 70, MotionEvent.ACTION_UP, x, y, 0);\n        try {\n            geckoView.dispatchTouchEvent(down);\n            geckoView.dispatchTouchEvent(up);\n        } finally {\n            down.recycle();\n            up.recycle();\n        }\n    }\n\n'''
+          if marker not in j:
+              raise SystemExit('Could not find immersive method marker')
+          j = j.replace(marker, remote_methods + marker)
+          java.write_text(j)
+
+          # Capture remote Arrow keys inside the locked YouTube page. This gives\n          # direct TV-style seeking even when YouTube's own controls do not have focus.\n          js = root / 'app/src/main/assets/kidslock/content.js'
+          c = js.read_text()
+          remote_js = r'''\n\n  function tvVideo() {\n    return document.querySelector('video.html5-main-video, video');\n  }\n\n  function revealTvControls() {\n    const player = document.querySelector('.html5-video-player');\n    if (!player) return;\n    try {\n      player.classList.remove('ytp-autohide');\n      player.classList.add('ytp-user-active');\n      player.dispatchEvent(new MouseEvent('mousemove', {\n        bubbles:true, clientX:Math.floor(innerWidth / 2), clientY:Math.floor(innerHeight / 2)\n      }));\n    } catch (_) {}\n  }\n\n  document.addEventListener('keydown', ev => {\n    const video = tvVideo();\n    if (!video) return;\n    const key = ev.key || '';\n\n    if (key === 'ArrowLeft') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.currentTime = Math.max(0, video.currentTime - 10); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'ArrowRight') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.currentTime = Math.min(isFinite(video.duration) ? video.duration : video.currentTime + 10, video.currentTime + 10); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'ArrowUp' || key === 'ArrowDown') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      revealTvControls();\n      return;\n    }\n    if (key === 'MediaPlay') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.play(); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'MediaPause') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.pause(); } catch (_) {}\n      revealTvControls();\n      return;\n    }\n    if (key === 'MediaPlayPause' || key === ' ' || key === 'Enter') {\n      ev.preventDefault();\n      ev.stopImmediatePropagation();\n      try { video.paused ? video.play() : video.pause(); } catch (_) {}\n      revealTvControls();\n    }\n  }, true);\n'''
+          close = '\n})();\n'
+          if close not in c:
+              raise SystemExit('Could not find kidslock script end')
+          c = c.replace(close, remote_js + close)
+          js.write_text(c)
           PY
-          grep -q "versionName '8.1.0-tv'" kids-video-tv/app/build.gradle
+          grep -q "versionName '8.2.0-tv'" kids-video-tv/app/build.gradle
           grep -q "geckoview-beta-armeabi-v7a" kids-video-tv/app/build.gradle
           grep -q "abiFilters 'armeabi-v7a'" kids-video-tv/app/build.gradle
           grep -q "applicationIdSuffix '.daughter.tv'" kids-video-tv/app/build.gradle
@@ -73,9 +97,12 @@ jobs:
           grep -q 'android.intent.category.LEANBACK_LAUNCHER' kids-video-tv/app/src/main/AndroidManifest.xml
           ! grep -q 'android.intent.category.LAUNCHER' kids-video-tv/app/src/main/AndroidManifest.xml
           grep -q 'android:screenOrientation="landscape"' kids-video-tv/app/src/main/AndroidManifest.xml
+          grep -q "KEYCODE_DPAD_CENTER" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "tapPlayerCenter" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "ArrowLeft" kids-video-tv/app/src/main/assets/kidslock/content.js
+          grep -q "ArrowRight" kids-video-tv/app/src/main/assets/kidslock/content.js
           grep -q "network.http.http3.enable" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "EXTRA_PARENT_SIGN_IN" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
-          grep -q "kidslock" kids-video-tv/app/src/main/assets/kidslock/content.js
           ! grep -R -q "TextToSpeech\|startEnglishCoach\|Speak English" kids-video-tv/app/src/main/java
 
       - name: Build TV Daughter and Son APKs
@@ -85,24 +112,24 @@ jobs:
       - name: Verify ARMv7-only TV APKs
         run: |
           mkdir -p dist
-          cp kids-video-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-TV.apk
-          cp kids-video-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-TV.apk
-          test -s dist/Daughter-Video-TV.apk
-          test -s dist/Son-Video-TV.apk
-          unzip -t dist/Daughter-Video-TV.apk >/dev/null
-          unzip -t dist/Son-Video-TV.apk >/dev/null
-          unzip -l dist/Daughter-Video-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
-          unzip -l dist/Son-Video-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
-          if unzip -l dist/Daughter-Video-TV.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Daughter TV APK'; exit 1; fi
-          if unzip -l dist/Son-Video-TV.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Son TV APK'; exit 1; fi
+          cp kids-video-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-TV-v8.2.apk
+          cp kids-video-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-TV-v8.2.apk
+          test -s dist/Daughter-Video-TV-v8.2.apk
+          test -s dist/Son-Video-TV-v8.2.apk
+          unzip -t dist/Daughter-Video-TV-v8.2.apk >/dev/null
+          unzip -t dist/Son-Video-TV-v8.2.apk >/dev/null
+          unzip -l dist/Daughter-Video-TV-v8.2.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          unzip -l dist/Son-Video-TV-v8.2.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          if unzip -l dist/Daughter-Video-TV-v8.2.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Daughter TV APK'; exit 1; fi
+          if unzip -l dist/Son-Video-TV-v8.2.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Son TV APK'; exit 1; fi
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          keytool -printcert -jarfile dist/Daughter-Video-TV.apk > dist/SIGNING-CERT-Daughter-TV.txt
-          keytool -printcert -jarfile dist/Son-Video-TV.apk > dist/SIGNING-CERT-Son-TV.txt
-          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-TV-Source.tar.gz -C kids-video-tv .
+          keytool -printcert -jarfile dist/Daughter-Video-TV-v8.2.apk > dist/SIGNING-CERT-Daughter-TV.txt
+          keytool -printcert -jarfile dist/Son-Video-TV-v8.2.apk > dist/SIGNING-CERT-Son-TV.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-TV-v8.2-Source.tar.gz -C kids-video-tv .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kids-video-tv-apks
+          name: kids-video-tv-v8.2-apks
           path: dist/
           if-no-files-found: error
           retention-days: 30

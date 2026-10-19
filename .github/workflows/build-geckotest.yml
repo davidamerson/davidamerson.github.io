@@ -1,0 +1,43 @@
+name: Build GeckoView Locked Browser Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-geckoview-test" ]
+    paths:
+      - "geckotest/**"
+      - ".github/workflows/build-geckotest.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build test APK
+        working-directory: geckotest
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Package output
+        run: |
+          mkdir -p dist
+          cp geckotest/app/build/outputs/apk/debug/app-debug.apk dist/Kids-Locked-Browser-Test.apk
+          sha256sum dist/Kids-Locked-Browser-Test.apk > dist/SHA256SUMS.txt
+          keytool -printcert -jarfile dist/Kids-Locked-Browser-Test.apk > dist/SIGNING-CERT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kids-geckoview-test-apk
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

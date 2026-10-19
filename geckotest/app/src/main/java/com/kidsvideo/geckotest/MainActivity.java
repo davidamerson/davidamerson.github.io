@@ -32,15 +32,11 @@ public final class MainActivity extends Activity {
     private static GeckoRuntime runtime;
 
     private GeckoSession session;
-    private GeckoView geckoView;
     private TextView status;
     private ProgressBar progress;
     private LinearLayout parentBar;
-    private Button signInButton;
-    private Button testButton;
 
     private boolean parentMode = true;
-    private boolean watchLoaded;
     private boolean fullScreen;
     private boolean lockInstalled;
     private String currentTopUrl = "";
@@ -51,19 +47,18 @@ public final class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.BLACK);
         getWindow().setNavigationBarColor(Color.BLACK);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        immersive(true);
+        immersive();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
 
-        geckoView = new GeckoView(this);
+        GeckoView geckoView = new GeckoView(this);
         root.addView(geckoView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         progress = new ProgressBar(this);
-        FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(64, 64, Gravity.CENTER);
-        root.addView(progress, pp);
+        root.addView(progress, new FrameLayout.LayoutParams(64, 64, Gravity.CENTER));
         progress.setVisibility(View.GONE);
 
         status = new TextView(this);
@@ -72,12 +67,12 @@ public final class MainActivity extends Activity {
         status.setTextSize(15f);
         status.setBackgroundColor(0xDD000000);
         status.setPadding(20, 12, 20, 12);
-        FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        sp.topMargin = 18;
-        root.addView(status, sp);
+        statusParams.topMargin = 18;
+        root.addView(status, statusParams);
 
         parentBar = new LinearLayout(this);
         parentBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -85,23 +80,22 @@ public final class MainActivity extends Activity {
         parentBar.setPadding(12, 10, 12, 10);
         parentBar.setBackgroundColor(0xEE111111);
 
-        signInButton = new Button(this);
+        Button signInButton = new Button(this);
         signInButton.setText("1. Parent Sign-In");
-        parentBar.addView(signInButton, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        parentBar.addView(signInButton, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        testButton = new Button(this);
+        Button testButton = new Button(this);
         testButton.setText("2. Test Locked Video");
-        LinearLayout.LayoutParams testParams = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        LinearLayout.LayoutParams testParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         testParams.leftMargin = 8;
         parentBar.addView(testButton, testParams);
 
-        FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(
+        root.addView(parentBar, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM);
-        root.addView(parentBar, bp);
+                Gravity.BOTTOM));
 
         setContentView(root);
 
@@ -113,18 +107,14 @@ public final class MainActivity extends Activity {
         session.setNavigationDelegate(new GeckoSession.NavigationDelegate() {
             @Override public GeckoResult<AllowOrDeny> onLoadRequest(
                     GeckoSession s, GeckoSession.NavigationDelegate.LoadRequest request) {
-                // In parent setup mode, allow the Google/YouTube sign-in flow to complete.
                 if (parentMode) {
                     return GeckoResult.fromValue(AllowOrDeny.ALLOW);
                 }
-
-                // In child/test mode, only the exact selected YouTube watch page is allowed.
                 return GeckoResult.fromValue(
                         isSameVideoWatchUrl(request.uri) ? AllowOrDeny.ALLOW : AllowOrDeny.DENY);
             }
 
             @Override public GeckoResult<GeckoSession> onNewSession(GeckoSession s, String uri) {
-                // No popups/new tabs. Google sign-in normally completes in the same tab.
                 return null;
             }
         });
@@ -134,7 +124,7 @@ public final class MainActivity extends Activity {
                 currentTopUrl = url == null ? "" : url;
                 if (parentMode) {
                     status.setVisibility(View.VISIBLE);
-                    status.setText("Parent mode: finish Google/YouTube sign-in, then tap ‘Test Locked Video’.\nYour password is entered on Google’s page, not read by this app.");
+                    status.setText("Parent mode: finish Google/YouTube sign-in, then tap ‘Test Locked Video’.\nYour password is entered only on Google’s page.");
                 } else if (isSameVideoWatchUrl(currentTopUrl)) {
                     status.setVisibility(View.VISIBLE);
                     status.setText("SIGNED-SESSION TEST — QUIC OFF — loading selected video…");
@@ -152,7 +142,6 @@ public final class MainActivity extends Activity {
                 }
 
                 if (!parentMode && isSameVideoWatchUrl(currentTopUrl)) {
-                    watchLoaded = true;
                     status.setVisibility(View.GONE);
                     progress.setVisibility(View.GONE);
                 } else if (parentMode) {
@@ -165,7 +154,7 @@ public final class MainActivity extends Activity {
         session.setContentDelegate(new GeckoSession.ContentDelegate() {
             @Override public void onFullScreen(GeckoSession s, boolean enabled) {
                 fullScreen = enabled;
-                immersive(true);
+                immersive();
             }
         });
 
@@ -175,8 +164,6 @@ public final class MainActivity extends Activity {
         signInButton.setOnClickListener(v -> openParentSignIn());
         testButton.setOnClickListener(v -> startLockedVideoTest());
 
-        // Keep the same networking condition as the previous diagnostic:
-        // HTTP/3/QUIC disabled, everything else unchanged.
         GeckoPreferenceController.setGeckoPref(
                 "network.http.http3.enable",
                 false,
@@ -193,7 +180,6 @@ public final class MainActivity extends Activity {
 
     private void openParentSignIn() {
         parentMode = true;
-        watchLoaded = false;
         parentBar.setVisibility(View.VISIBLE);
         progress.setVisibility(View.VISIBLE);
         status.setVisibility(View.VISIBLE);
@@ -203,7 +189,6 @@ public final class MainActivity extends Activity {
 
     private void startLockedVideoTest() {
         parentMode = false;
-        watchLoaded = false;
         parentBar.setVisibility(View.GONE);
         progress.setVisibility(View.VISIBLE);
         status.setVisibility(View.VISIBLE);
@@ -235,14 +220,13 @@ public final class MainActivity extends Activity {
             if (host == null || !(host.equals("youtube.com") || host.endsWith(".youtube.com"))) {
                 return false;
             }
-            if (!"/watch".equals(u.getPath())) return false;
-            return VIDEO_ID.equals(u.getQueryParameter("v"));
+            return "/watch".equals(u.getPath()) && VIDEO_ID.equals(u.getQueryParameter("v"));
         } catch (Throwable ignored) {
             return false;
         }
     }
 
-    private void immersive(boolean ignored) {
+    private void immersive() {
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
@@ -257,19 +241,9 @@ public final class MainActivity extends Activity {
             session.exitFullScreen();
             return;
         }
-
-        if (!parentMode) {
-            // Leaving the locked player exits the test instead of returning to YouTube browsing.
-            finish();
-            return;
-        }
-
-        // Parent sign-in mode may use Back normally within the authentication flow.
-        if (session != null && session.canGoBack()) {
-            session.goBack();
-        } else {
-            finish();
-        }
+        // In the locked test, Back must never reveal YouTube browsing. In parent
+        // mode this simply closes the diagnostic; reopen it to retry sign-in.
+        finish();
     }
 
     @Override protected void onDestroy() {

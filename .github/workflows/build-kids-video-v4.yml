@@ -36,7 +36,9 @@ jobs:
           cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-final-source.tar.gz
           echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-final-source.tar.gz" | sha256sum -c -
           tar -xzf /tmp/kids-video-final-source.tar.gz -C kids-video-final
+          sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-video-final/settings.gradle
           test -f kids-video-final/app/build.gradle
+          grep -q "maven.mozilla.org" kids-video-final/settings.gradle
           grep -q "versionName '8.0.0'" kids-video-final/app/build.gradle
           grep -q "geckoview-beta-arm64-v8a" kids-video-final/app/build.gradle
           grep -q "network.http.http3.enable" kids-video-final/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java

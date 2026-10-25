@@ -50,3 +50,5 @@ jobs:
             final/Son-Video-v9.0.2-TV.apk \
             --title "Kids Video v9.0.2 Install Fix" \
             --notes "Fresh install-fix builds. Built through the same Gradle DEBUG packaging/signing path as the proven working app family. New v9 features retained. Signing-key backup is intentionally NOT published in this public release."
+
+# republish direct APK assets 2026-10-25

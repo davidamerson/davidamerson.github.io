@@ -1,0 +1,143 @@
+name: Build Kids Video v9 Unsigned Permanent IDs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-final" ]
+    paths:
+      - ".github/workflows/build-kids-video-v9-unsigned-permanent-ids.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Restore proven v8 source and apply verified v9 features
+        run: |
+          set -euo pipefail
+          rm -rf kids-video-v9-phone kids-video-v9-tv dist
+          mkdir -p kids-video-v9-phone dist
+
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-v8-source.tar.gz
+          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-v8-source.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kids-video-v8-source.tar.gz -C kids-video-v9-phone
+
+          cat \
+            v9-phone-patch-small/00.b64 \
+            v9-phone-patch-safe/01-0.b64 \
+            v9-phone-patch-safe/01-1.b64 \
+            v9-phone-patch-safe/01-2.b64 \
+            v9-phone-patch-safe/01-3.b64 \
+            v9-phone-patch-small/02.b64 \
+            v9-phone-patch-safe/03-0.b64 \
+            v9-phone-patch-safe/03-1.b64 \
+            v9-phone-patch-safe/03-2.b64 \
+            v9-phone-patch-safe/03-3.b64 \
+            | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/v9phone.patch
+          echo "0b882150b2011293381814a2c7cbb04e0248abefed08fc57d8d82cc7252afc79  /tmp/v9phone.patch" | sha256sum -c -
+          (cd kids-video-v9-phone && patch -p1 < /tmp/v9phone.patch)
+
+          if ! grep -q 'maven.mozilla.org' kids-video-v9-phone/settings.gradle; then
+            sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-video-v9-phone/settings.gradle
+          fi
+
+          grep -q "versionName '9.0.0'" kids-video-v9-phone/app/build.gradle
+          grep -q "searchApprovedVideos" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/YoutubeApi.java
+          grep -q "getParentVideosText" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "getParentPlaylistsText" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "@McCannDogs" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@StonnieDennis" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@WolfooFamilyOffical" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "network.http.http3.enable" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "EXTRA_PARENT_SIGN_IN" kids-video-v9-phone/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+
+      - name: Derive TV source and apply verified TV remote/focus delta
+        run: |
+          set -euo pipefail
+          cp -a kids-video-v9-phone kids-video-v9-tv
+          git fetch --depth=1 origin kids-video-tv-final
+          git show FETCH_HEAD:v9-tv-patch-parts/00.b64 > /tmp/tv00.b64
+          git show FETCH_HEAD:v9-tv-patch-parts/01.b64 > /tmp/tv01.b64
+          cat /tmp/tv00.b64 /tmp/tv01.b64 | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/tv.patch
+          echo "d038ef43d731d2306b7c00edb75965e8a2dfe24559a776fbb0862a23802bbc78  /tmp/tv.patch" | sha256sum -c -
+          (cd kids-video-v9-tv && patch -p1 < /tmp/tv.patch)
+
+          grep -q "versionName '9.0.0-tv'" kids-video-v9-tv/app/build.gradle
+          grep -q "abiFilters 'armeabi-v7a'" kids-video-v9-tv/app/build.gradle
+          grep -q "KEYCODE_DPAD_CENTER" kids-video-v9-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "tapPlayerCenter" kids-video-v9-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "ArrowLeft" kids-video-v9-tv/app/src/main/assets/kidslock/content.js
+          grep -q "SELECTED" kids-video-v9-tv/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
+
+      - name: Set new permanent package IDs
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          for p in [Path('kids-video-v9-phone/app/build.gradle'), Path('kids-video-v9-tv/app/build.gradle')]:
+              s = p.read_text()
+              s = s.replace("applicationId 'com.kidsvideo.app'", "applicationId 'com.suresh.kidsvideo'")
+              p.write_text(s)
+          PY
+          grep -q "applicationId 'com.suresh.kidsvideo'" kids-video-v9-phone/app/build.gradle
+          grep -q "applicationIdSuffix '.daughter'" kids-video-v9-phone/app/build.gradle
+          grep -q "applicationIdSuffix '.son'" kids-video-v9-phone/app/build.gradle
+          grep -q "applicationIdSuffix '.daughter.tv'" kids-video-v9-tv/app/build.gradle
+          grep -q "applicationIdSuffix '.son.tv'" kids-video-v9-tv/app/build.gradle
+
+      - name: Build unsigned release Phone and Tablet APKs
+        working-directory: kids-video-v9-phone
+        run: gradle --no-daemon --stacktrace :app:assembleDaughterRelease :app:assembleSonRelease
+
+      - name: Build unsigned release Android TV APKs
+        working-directory: kids-video-v9-tv
+        run: gradle --no-daemon --stacktrace :app:assembleDaughterRelease :app:assembleSonRelease
+
+      - name: Package and verify unsigned outputs
+        run: |
+          set -euo pipefail
+          P_D="kids-video-v9-phone/app/build/outputs/apk/daughter/release/app-daughter-release-unsigned.apk"
+          P_S="kids-video-v9-phone/app/build/outputs/apk/son/release/app-son-release-unsigned.apk"
+          T_D="kids-video-v9-tv/app/build/outputs/apk/daughter/release/app-daughter-release-unsigned.apk"
+          T_S="kids-video-v9-tv/app/build/outputs/apk/son/release/app-son-release-unsigned.apk"
+
+          test -s "$P_D"; test -s "$P_S"; test -s "$T_D"; test -s "$T_S"
+          cp "$P_D" dist/Daughter-Video-v9-Phone-Tablet-UNSIGNED.apk
+          cp "$P_S" dist/Son-Video-v9-Phone-Tablet-UNSIGNED.apk
+          cp "$T_D" dist/Daughter-Video-v9-TV-UNSIGNED.apk
+          cp "$T_S" dist/Son-Video-v9-TV-UNSIGNED.apk
+
+          grep -q '"applicationId": "com.suresh.kidsvideo.daughter"' kids-video-v9-phone/app/build/outputs/apk/daughter/release/output-metadata.json
+          grep -q '"applicationId": "com.suresh.kidsvideo.son"' kids-video-v9-phone/app/build/outputs/apk/son/release/output-metadata.json
+          grep -q '"applicationId": "com.suresh.kidsvideo.daughter.tv"' kids-video-v9-tv/app/build/outputs/apk/daughter/release/output-metadata.json
+          grep -q '"applicationId": "com.suresh.kidsvideo.son.tv"' kids-video-v9-tv/app/build/outputs/apk/son/release/output-metadata.json
+
+          for apk in dist/*-UNSIGNED.apk; do unzip -t "$apk" >/dev/null; done
+          unzip -l dist/Daughter-Video-v9-Phone-Tablet-UNSIGNED.apk | grep -q 'lib/arm64-v8a/libxul.so'
+          unzip -l dist/Son-Video-v9-Phone-Tablet-UNSIGNED.apk | grep -q 'lib/arm64-v8a/libxul.so'
+          unzip -l dist/Daughter-Video-v9-TV-UNSIGNED.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          unzip -l dist/Son-Video-v9-TV-UNSIGNED.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          if unzip -l dist/Daughter-Video-v9-TV-UNSIGNED.apk | grep -q 'lib/arm64-v8a/'; then exit 1; fi
+          if unzip -l dist/Son-Video-v9-TV-UNSIGNED.apk | grep -q 'lib/arm64-v8a/'; then exit 1; fi
+
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v9-Phone-Source-PermanentIDs.tar.gz -C kids-video-v9-phone .
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v9-TV-Source-PermanentIDs.tar.gz -C kids-video-v9-tv .
+          sha256sum dist/*-UNSIGNED.apk > dist/UNSIGNED-SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kids-video-v9-unsigned-permanent-ids
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

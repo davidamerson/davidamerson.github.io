@@ -6,6 +6,7 @@ on:
     branches: [ "kids-video-final" ]
     paths:
       - "v9-phone-patch-small/**"
+      - "v9-phone-patch-safe/**"
       - ".github/workflows/build-kids-video-v4.yml"
 
 jobs:
@@ -37,7 +38,18 @@ jobs:
           echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-v8-source.tar.gz" | sha256sum -c -
           tar -xzf /tmp/kids-video-v8-source.tar.gz -C kids-video-v9
 
-          cat v9-phone-patch-small/*.b64 | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/v9phone.patch
+          cat \
+            v9-phone-patch-small/00.b64 \
+            v9-phone-patch-safe/01-0.b64 \
+            v9-phone-patch-safe/01-1.b64 \
+            v9-phone-patch-safe/01-2.b64 \
+            v9-phone-patch-safe/01-3.b64 \
+            v9-phone-patch-small/02.b64 \
+            v9-phone-patch-safe/03-0.b64 \
+            v9-phone-patch-safe/03-1.b64 \
+            v9-phone-patch-safe/03-2.b64 \
+            v9-phone-patch-safe/03-3.b64 \
+            | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/v9phone.patch
           echo "0b882150b2011293381814a2c7cbb04e0248abefed08fc57d8d82cc7252afc79  /tmp/v9phone.patch" | sha256sum -c -
           (cd kids-video-v9 && patch -p1 < /tmp/v9phone.patch)
 

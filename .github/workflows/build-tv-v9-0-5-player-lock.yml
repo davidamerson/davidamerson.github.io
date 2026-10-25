@@ -1,0 +1,323 @@
+name: Build TV v9.0.5 Player Lock
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-tv-final" ]
+    paths:
+      - ".github/workflows/build-tv-v9-0-5-player-lock.yml"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Restore proven v9 TV source
+        run: |
+          set -euo pipefail
+          rm -rf src
+          mkdir -p src
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/v8.tar.gz
+          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/v8.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/v8.tar.gz -C src
+          rm -f /tmp/v9.b64
+          for path in v9-phone-patch-small/00.b64 v9-phone-patch-safe/01-0.b64 v9-phone-patch-safe/01-1.b64 v9-phone-patch-safe/01-2.b64 v9-phone-patch-safe/01-3.b64 v9-phone-patch-small/02.b64 v9-phone-patch-safe/03-0.b64 v9-phone-patch-safe/03-1.b64 v9-phone-patch-safe/03-2.b64 v9-phone-patch-safe/03-3.b64; do
+            curl -fsSL "https://raw.githubusercontent.com/davidamerson/davidamerson.github.io/kids-video-final/${path}" >> /tmp/v9.b64
+          done
+          tr -d '\n\r ' < /tmp/v9.b64 | base64 -d | gzip -d > /tmp/v9.patch
+          echo "0b882150b2011293381814a2c7cbb04e0248abefed08fc57d8d82cc7252afc79  /tmp/v9.patch" | sha256sum -c -
+          (cd src && patch -p1 < /tmp/v9.patch)
+          cat v9-tv-patch-parts/*.b64 | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/tv.patch
+          echo "d038ef43d731d2306b7c00edb75965e8a2dfe24559a776fbb0862a23802bbc78  /tmp/tv.patch" | sha256sum -c -
+          (cd src && patch -p1 < /tmp/tv.patch)
+          if ! grep -q 'maven.mozilla.org' src/settings.gradle; then
+            sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" src/settings.gradle
+          fi
+
+      - name: Recover the exact signing key used by installed v9.0.2 TV apps
+        uses: actions/download-artifact@v4
+        with:
+          name: kids-video-v9-0-2-final-install-fix
+          path: old-final
+          run-id: 40191024318
+          github-token: ${{ github.token }}
+
+      - name: Install original signing key and set v9.0.5 package/version
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.android dist
+          test -s old-final/Kids-Video-Permanent-Key-v9.0.2.keystore
+          cp old-final/Kids-Video-Permanent-Key-v9.0.2.keystore ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/app/build.gradle')
+          s=p.read_text()
+          s=s.replace("applicationId 'com.kidsvideo.app'", "applicationId 'com.suresh.kidsvideo'")
+          s=s.replace("versionCode 90000", "versionCode 90500")
+          s=s.replace("versionName '9.0.0-tv'", "versionName '9.0.5-tv'")
+          p.write_text(s)
+          PY
+
+      - name: Apply forced fullscreen player-only playback and remote focus fixes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p=Path('src/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java')
+          s=p.read_text()
+
+          old='''        Uri url = new Uri.Builder()\n                .scheme("https")\n                .authority("m.youtube.com")\n                .path("watch")\n                .appendQueryParameter("v", videoId)\n                .appendQueryParameter("autoplay", "0")\n                .appendQueryParameter("kidslock", "1")\n                .build();'''
+          new='''        Uri url = new Uri.Builder()\n                .scheme("https")\n                .authority("www.youtube.com")\n                .path("embed/" + videoId)\n                .appendQueryParameter("autoplay", "1")\n                .appendQueryParameter("controls", "1")\n                .appendQueryParameter("rel", "0")\n                .appendQueryParameter("playsinline", "0")\n                .appendQueryParameter("fs", "0")\n                .appendQueryParameter("iv_load_policy", "3")\n                .appendQueryParameter("kidslock", "1")\n                .build();'''
+          if old not in s:
+              raise SystemExit('loadSelectedVideo block not found')
+          s=s.replace(old,new)
+
+          old_body='''            if (host == null || !(host.equals("youtube.com") || host.endsWith(".youtube.com"))) return false;\n            if (!"/watch".equals(u.getPath())) return false;\n            return videoId.equals(u.getQueryParameter("v"));'''
+          new_body='''            if (host == null || !(host.equals("youtube.com") || host.endsWith(".youtube.com"))) return false;\n            String path = u.getPath() == null ? "" : u.getPath();\n            if (("/embed/" + videoId).equals(path)) return true;\n            return "/watch".equals(path) && videoId.equals(u.getQueryParameter("v"));'''
+          if old_body not in s:
+              raise SystemExit('URL lock block not found')
+          s=s.replace(old_body,new_body)
+
+          old_back='''    @Override public void onBackPressed() {\n        if (fullScreen && session != null) {\n            session.exitFullScreen();\n            return;\n        }\n        if (parentMode) {\n            finish();\n            return;\n        }\n        finishWithWatchResult(watchedSeconds());\n    }'''
+          new_back='''    @Override public void onBackPressed() {\n        if (parentMode) {\n            finish();\n            return;\n        }\n        // Child playback has only one Back behavior: leave YouTube completely\n        // and return to our approved-video catalogue. Never expose the watch page.\n        finishWithWatchResult(watchedSeconds());\n    }'''
+          if old_back not in s:
+              raise SystemExit('onBackPressed block not found')
+          s=s.replace(old_back,new_back)
+          p.write_text(s)
+
+          p=Path('src/app/src/main/java/com/kidsvideo/app/MainActivity.java')
+          s=p.read_text()
+          old='''        grid.setSelector(android.R.color.transparent);'''
+          new='''        GradientDrawable tvSelector = new GradientDrawable();\n        tvSelector.setColor(Color.TRANSPARENT);\n        tvSelector.setCornerRadius(dp(14));\n        tvSelector.setStroke(dp(6), Color.rgb(255, 214, 64));\n        grid.setSelector(tvSelector);\n        grid.setDrawSelectorOnTop(true);\n        if (tv) {\n            grid.setOnFocusChangeListener((v, hasFocus) -> {\n                if (hasFocus && adapter != null && adapter.getCount() > 0 && grid.getSelectedItemPosition() < 0) {\n                    grid.setSelection(0);\n                }\n            });\n        }'''
+          if old not in s:
+              raise SystemExit('transparent grid selector not found')
+          s=s.replace(old,new)
+          p.write_text(s)
+          PY
+
+          cat > src/app/src/main/assets/kidslock/content.js <<'JS'
+          (() => {
+            'use strict';
+            try {
+              const u = new URL(location.href);
+              if (u.searchParams.get('kidslock') !== '1') return;
+            } catch (_) { return; }
+
+            const HIDE = [
+              'ytd-masthead','#masthead','#masthead-container','ytm-mobile-topbar-renderer',
+              '#secondary','#below','#related','#comments','ytd-comments','ytm-comments-entry-point-header-renderer',
+              'ytd-watch-next-secondary-results-renderer','ytm-watch-next-secondary-results-renderer',
+              'ytm-item-section-renderer','ytd-merch-shelf-renderer','#chat-container','#panels','ytd-watch-metadata',
+              'ytm-slim-video-metadata-section-renderer','ytm-video-with-context-renderer','ytd-popup-container',
+              '.ytp-ce-element','.ytp-endscreen-content','.ytp-suggested-action','.ytp-endscreen-previous',
+              '.ytp-endscreen-next','.ytp-pause-overlay','.ytp-pause-overlay-container','.ytp-cards-teaser',
+              '.ytp-cards-button','.ytp-videowall-still','.ytp-suggestion-set','.ytp-upnext',
+              '.ytp-autonav-endscreen-countdown-container','.ytp-title','.ytp-title-text','.ytp-title-link',
+              '.ytp-chrome-top','.ytp-watermark','.ytp-youtube-button','.ytp-impression-link',
+              '.ytp-fullscreen-button','.ytp-miniplayer-button','.ytp-size-button'
+            ].join(',');
+
+            const css = `
+              html,body,ytd-app,ytm-app,#page-manager,#content,#player,#player-container,#player-container-outer,#player-container-inner {
+                margin:0!important;padding:0!important;background:#000!important;overflow:hidden!important;
+                width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;
+              }
+              ${HIDE} { display:none!important;visibility:hidden!important;pointer-events:none!important; }
+              .html5-video-player {
+                position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;
+                max-width:none!important;max-height:none!important;z-index:2147483646!important;background:#000!important;
+              }
+              .html5-video-container,video.html5-main-video {
+                width:100%!important;height:100%!important;max-width:100vw!important;max-height:100vh!important;
+                object-fit:contain!important;background:#000!important;
+              }
+            `;
+
+            function ensureStyle() {
+              let style=document.getElementById('kids-video-tv-lock-style');
+              if (!style) {
+                style=document.createElement('style'); style.id='kids-video-tv-lock-style';
+                style.textContent=css; (document.head||document.documentElement).appendChild(style);
+              }
+            }
+
+            function hideUnsafeSurfaces() {
+              try {
+                document.querySelectorAll(HIDE).forEach(el => {
+                  el.style.setProperty('display','none','important');
+                  el.style.setProperty('visibility','hidden','important');
+                  el.style.setProperty('pointer-events','none','important');
+                  try { el.setAttribute('tabindex','-1'); } catch (_) {}
+                });
+              } catch (_) {}
+            }
+
+            function videoEl() { return document.querySelector('video.html5-main-video,video'); }
+
+            function revealControls() {
+              const p=document.querySelector('.html5-video-player');
+              if (!p) return;
+              try {
+                p.classList.remove('ytp-autohide'); p.classList.add('ytp-user-active');
+                p.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:Math.floor(innerWidth/2),clientY:Math.floor(innerHeight/2)}));
+              } catch (_) {}
+            }
+
+            function officialSkipButton() {
+              const selectors=[
+                '.ytp-ad-skip-button-modern','.ytp-ad-skip-button','.ytp-skip-ad-button',
+                'button.ytp-ad-skip-button-modern','button.ytp-ad-skip-button','button.ytp-skip-ad-button'
+              ];
+              for (const sel of selectors) {
+                const b=document.querySelector(sel);
+                if (b && b.getClientRects().length && !b.disabled) return b;
+              }
+              return null;
+            }
+
+            function activateOfficialSkipWhenAvailable() {
+              const b=officialSkipButton();
+              if (!b) return false;
+              try { b.click(); return true; } catch (_) { return false; }
+            }
+
+            let bound=null;
+            function bindAndAutoplay() {
+              const v=videoEl(); if (!v) return;
+              if (v !== bound) {
+                bound=v;
+                v.autoplay=true;
+                try { v.setAttribute('autoplay',''); } catch (_) {}
+                v.addEventListener('ended', () => {
+                  try { v.pause(); } catch (_) {}
+                  hideUnsafeSurfaces();
+                }, true);
+              }
+              if (v.paused && !v.ended) {
+                try { const r=v.play(); if (r && r.catch) r.catch(()=>{}); } catch (_) {}
+              }
+            }
+
+            function lockPage() {
+              ensureStyle(); hideUnsafeSurfaces();
+              const p=document.querySelector('.html5-video-player');
+              if (p) {
+                p.style.setProperty('position','fixed','important'); p.style.setProperty('inset','0','important');
+                p.style.setProperty('width','100vw','important'); p.style.setProperty('height','100vh','important');
+                p.style.setProperty('z-index','2147483646','important'); p.style.setProperty('background','#000','important');
+              }
+              bindAndAutoplay();
+              activateOfficialSkipWhenAvailable();
+              const autonav=document.querySelector('.ytp-autonav-toggle-button');
+              if (autonav && autonav.getAttribute('aria-checked')==='true') { try { autonav.click(); } catch (_) {} }
+            }
+
+            // Only the player controls are usable. Navigation/recommendation clicks are blocked.
+            document.addEventListener('click', ev => {
+              const t=ev.target; if (!t || !t.closest) return;
+              const unsafe=t.closest(HIDE+',a[href],.ytp-ce-element,.ytp-videowall-still,.ytp-suggested-action');
+              if (unsafe) { ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+              const inPlayer=t.closest('.html5-video-player');
+              if (!inPlayer) { ev.preventDefault(); ev.stopImmediatePropagation(); }
+            }, true);
+            document.addEventListener('auxclick', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); }, true);
+
+            document.addEventListener('keydown', ev => {
+              const v=videoEl(); if (!v) return;
+              const key=ev.key||'';
+              if (key==='ArrowLeft') { ev.preventDefault();ev.stopImmediatePropagation();try{v.currentTime=Math.max(0,v.currentTime-10);}catch(_){} revealControls();return; }
+              if (key==='ArrowRight') { ev.preventDefault();ev.stopImmediatePropagation();try{v.currentTime=Math.min(isFinite(v.duration)?v.duration:v.currentTime+10,v.currentTime+10);}catch(_){} revealControls();return; }
+              if (key==='ArrowUp'||key==='ArrowDown') { ev.preventDefault();ev.stopImmediatePropagation();revealControls();return; }
+              if (key==='Enter'||key===' '||key==='MediaPlayPause') {
+                ev.preventDefault();ev.stopImmediatePropagation();
+                if (activateOfficialSkipWhenAvailable()) return;
+                try { v.paused ? v.play() : v.pause(); } catch (_) {}
+                revealControls(); return;
+              }
+              if (key==='MediaPlay') { ev.preventDefault();ev.stopImmediatePropagation();try{v.play();}catch(_){} revealControls();return; }
+              if (key==='MediaPause') { ev.preventDefault();ev.stopImmediatePropagation();try{v.pause();}catch(_){} revealControls(); }
+            }, true);
+
+            const observer=new MutationObserver(lockPage);
+            observer.observe(document.documentElement,{subtree:true,childList:true,attributes:false});
+            window.addEventListener('load',lockPage,true);
+            document.addEventListener('DOMContentLoaded',lockPage,true);
+            setInterval(lockPage,250);
+          })();
+          JS
+
+      - name: Assert requested safety behavior before build
+        run: |
+          set -euo pipefail
+          grep -q 'path("embed/" + videoId)' src/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q 'appendQueryParameter("autoplay", "1")' src/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q 'appendQueryParameter("fs", "0")' src/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          ! grep -A15 'onBackPressed' src/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java | grep -q 'exitFullScreen'
+          grep -q 'grid.setDrawSelectorOnTop(true)' src/app/src/main/java/com/kidsvideo/app/MainActivity.java
+          grep -q 'setStroke(dp(6), Color.rgb(255, 214, 64))' src/app/src/main/java/com/kidsvideo/app/MainActivity.java
+          grep -q 'ytp-videowall-still' src/app/src/main/assets/kidslock/content.js
+          grep -q 'ytp-fullscreen-button' src/app/src/main/assets/kidslock/content.js
+          grep -q 'activateOfficialSkipWhenAvailable' src/app/src/main/assets/kidslock/content.js
+          grep -q 'geckoview-beta-armeabi-v7a' src/app/build.gradle
+          grep -q "versionCode 90500" src/app/build.gradle
+          grep -q "applicationId 'com.suresh.kidsvideo'" src/app/build.gradle
+
+      - name: Build Daughter and Son TV updates through proven Gradle DEBUG path
+        working-directory: src
+        run: gradle --no-daemon --stacktrace :app:assembleDaughterDebug :app:assembleSonDebug
+
+      - name: Verify APKs, packages, ABI and original signing certificate
+        run: |
+          set -euo pipefail
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          cp src/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-TV-v9.0.5-Player-Lock.apk
+          cp src/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-TV-v9.0.5-Player-Lock.apk
+          for apk in dist/*.apk; do
+            test -s "$apk"
+            unzip -t "$apk" >/dev/null
+            "$BT/apksigner" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
+            "$BT/zipalign" -c -P 16 -v 4 "$apk" >/dev/null
+            "$BT/aapt" dump badging "$apk" > "$apk.badging.txt"
+            grep -q 'lib/armeabi-v7a/libxul.so' <(unzip -l "$apk")
+            grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' "$apk.signature.txt"
+          done
+          grep -q "package: name='com.suresh.kidsvideo.daughter.tv' versionCode='90500'" dist/Daughter-Video-TV-v9.0.5-Player-Lock.apk.badging.txt
+          grep -q "package: name='com.suresh.kidsvideo.son.tv' versionCode='90500'" dist/Son-Video-TV-v9.0.5-Player-Lock.apk.badging.txt
+          grep -q 'leanback-launchable-activity:' dist/Daughter-Video-TV-v9.0.5-Player-Lock.apk.badging.txt
+          grep -q 'leanback-launchable-activity:' dist/Son-Video-TV-v9.0.5-Player-Lock.apk.badging.txt
+          EXPECTED="$(head -n1 old-final/SIGNING-CERT-SHA256-ALL-FOUR.txt | tr -d '\r\n ')"
+          test -n "$EXPECTED"
+          for sig in dist/*.signature.txt; do
+            ACTUAL="$(awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' "$sig" | tr -d '\r\n ')"
+            test "$ACTUAL" = "$EXPECTED"
+          done
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
+      - name: Publish direct APK files only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="kids-video-tv-v9.0.5-player-lock"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            dist/Daughter-Video-TV-v9.0.5-Player-Lock.apk \
+            dist/Son-Video-TV-v9.0.5-Player-Lock.apk \
+            --title "Kids Video TV v9.0.5 Player Lock" \
+            --notes "TV-only update: forced player-only fullscreen layout, autoplay selected video, hard-block recommended/end-screen navigation, Back returns directly to app, highly visible remote selection border, and automatically activates YouTube's official Skip Ad control when YouTube makes it available. Unskippable ads are not bypassed. Signed with the exact v9.0.2 TV signing certificate for in-place update."

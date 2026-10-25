@@ -23,7 +23,7 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Create one stable keystore for all four APKs in this build
+      - name: Create fallback debug keystore
         run: |
           set -euo pipefail
           mkdir -p ~/.android
@@ -35,7 +35,6 @@ jobs:
             -keypass android \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Kids Video Permanent v9,O=Suresh Kids Video,C=LK"
-          keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey > /tmp/signing-cert.txt
 
       - name: Restore proven working v8 phone source and apply verified v9 features
         run: |
@@ -94,7 +93,7 @@ jobs:
           grep -q "applicationIdSuffix '.daughter.tv'" kids-tv/app/build.gradle
           grep -q "applicationIdSuffix '.son.tv'" kids-tv/app/build.gradle
 
-      - name: Verify v9 features before build
+      - name: Verify v9 features and identify signing source
         run: |
           set -euo pipefail
           for root in kids-phone kids-tv; do
@@ -109,6 +108,11 @@ jobs:
           grep -q "KEYCODE_DPAD_CENTER" kids-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "tapPlayerCenter" kids-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "ArrowLeft" kids-tv/app/src/main/assets/kidslock/content.js
+
+          echo '--- Signing config references ---'
+          grep -R -n -E 'signingConfig|signingConfigs|storeFile|debug.keystore|\.jks|\.keystore' kids-phone/app/build.gradle kids-phone/gradle.properties kids-phone/app 2>/dev/null | head -80 || true
+          echo '--- Keystore-like files in restored project ---'
+          find kids-phone -type f \( -name '*.keystore' -o -name '*.jks' \) -print || true
 
       - name: Build Phone and Tablet APKs exactly like last working family - DEBUG
         working-directory: kids-phone
@@ -134,17 +138,15 @@ jobs:
           for apk in dist/*.apk; do
             test -s "$apk"
             unzip -t "$apk" >/dev/null
-            "$APKSIGNER" verify --verbose --print-certs "$apk" | tee "$apk.signature.txt"
-            "$ZIPALIGN" -c -P 16 -v 4 "$apk" | tee "$apk.zipalign.txt"
-            "$AAPT" dump badging "$apk" | tee "$apk.badging.txt"
+            "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
+            "$ZIPALIGN" -c -P 16 -v 4 "$apk" > "$apk.zipalign.txt"
+            "$AAPT" dump badging "$apk" > "$apk.badging.txt"
             grep -q "application-label:" "$apk.badging.txt"
+            grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" "$apk.signature.txt"
           done
 
-          # Phone/tablet variants use the standard Android launcher.
           grep -q "launchable-activity:" dist/Daughter-Video-v9.0.1-Phone-Tablet.apk.badging.txt
           grep -q "launchable-activity:" dist/Son-Video-v9.0.1-Phone-Tablet.apk.badging.txt
-
-          # TV variants intentionally use LEANBACK_LAUNCHER instead of the phone LAUNCHER.
           grep -q "leanback-launchable-activity:" dist/Daughter-Video-v9.0.1-TV.apk.badging.txt
           grep -q "leanback-launchable-activity:" dist/Son-Video-v9.0.1-TV.apk.badging.txt
           grep -q "uses-feature: name='android.software.leanback'" dist/Daughter-Video-v9.0.1-TV.apk.badging.txt
@@ -162,15 +164,17 @@ jobs:
 
           rm -f /tmp/certs.txt
           for apk in dist/*.apk; do
-            "$APKSIGNER" verify --print-certs "$apk" | grep 'Signer #1 certificate SHA-256 digest:' | sed 's/.*: //' >> /tmp/certs.txt
+            awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' "$apk.signature.txt" >> /tmp/certs.txt
           done
+          test "$(wc -l < /tmp/certs.txt)" -eq 4
           test "$(sort -u /tmp/certs.txt | wc -l)" -eq 1
+          cp /tmp/certs.txt dist/SIGNING-CERT-SHA256-ALL-FOUR.txt
 
-          cp ~/.android/debug.keystore dist/Kids-Video-v9.0.1-Signing-Key-KEEP-PRIVATE.keystore
-          cp /tmp/signing-cert.txt dist/SIGNING-CERTIFICATE.txt
+          # Keep the APKs and verification reports. Do not claim a signing-key backup
+          # until the actual Gradle signing source is confirmed to match the APK cert.
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          echo 'These APKs use the same Gradle DEBUG build/sign path as the last working app family, not the failed post-signed release method.' > dist/README-INSTALL.txt
-          echo 'Uninstall the four failed v9.0.0 APKs first if Android shows them as installed, then install these v9.0.1 APKs.' >> dist/README-INSTALL.txt
+          echo 'v9.0.1 install-fix: built directly with the same Gradle DEBUG build path as the previously working family.' > dist/README-INSTALL.txt
+          echo 'Uninstall failed v9.0.0 packages if present, then install these v9.0.1 APKs as fresh apps.' >> dist/README-INSTALL.txt
 
       - uses: actions/upload-artifact@v4
         with:

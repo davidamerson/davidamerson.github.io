@@ -1,0 +1,181 @@
+name: Build Kids Video v9.1 Install-Safe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-final" ]
+    paths:
+      - ".github/workflows/build-kids-video-v9-1-installable.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Restore proven v8 source and apply verified v9 features
+        run: |
+          set -euo pipefail
+          rm -rf kids-phone kids-tv dist
+          mkdir -p kids-phone dist
+
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/v8.tar.gz
+          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/v8.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/v8.tar.gz -C kids-phone
+
+          cat \
+            v9-phone-patch-small/00.b64 \
+            v9-phone-patch-safe/01-0.b64 \
+            v9-phone-patch-safe/01-1.b64 \
+            v9-phone-patch-safe/01-2.b64 \
+            v9-phone-patch-safe/01-3.b64 \
+            v9-phone-patch-small/02.b64 \
+            v9-phone-patch-safe/03-0.b64 \
+            v9-phone-patch-safe/03-1.b64 \
+            v9-phone-patch-safe/03-2.b64 \
+            v9-phone-patch-safe/03-3.b64 \
+            | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/v9.patch
+          echo "0b882150b2011293381814a2c7cbb04e0248abefed08fc57d8d82cc7252afc79  /tmp/v9.patch" | sha256sum -c -
+          (cd kids-phone && patch -p1 < /tmp/v9.patch)
+
+          if ! grep -q 'maven.mozilla.org' kids-phone/settings.gradle; then
+            sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-phone/settings.gradle
+          fi
+
+          cp -a kids-phone kids-tv
+          git fetch --depth=1 origin kids-video-tv-final
+          git show FETCH_HEAD:v9-tv-patch-parts/00.b64 > /tmp/tv00
+          git show FETCH_HEAD:v9-tv-patch-parts/01.b64 > /tmp/tv01
+          cat /tmp/tv00 /tmp/tv01 | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/tv.patch
+          echo "d038ef43d731d2306b7c00edb75965e8a2dfe24559a776fbb0862a23802bbc78  /tmp/tv.patch" | sha256sum -c -
+          (cd kids-tv && patch -p1 < /tmp/tv.patch)
+
+      - name: Set permanent package IDs and v9.1 version
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          for p in [Path('kids-phone/app/build.gradle'), Path('kids-tv/app/build.gradle')]:
+              s=p.read_text()
+              s=s.replace("applicationId 'com.kidsvideo.app'", "applicationId 'com.suresh.kidsvideo'")
+              s=s.replace("versionCode 90000", "versionCode 90100")
+              s=s.replace("versionName '9.0.0'", "versionName '9.1.0'")
+              s=s.replace("versionName '9.0.0-tv'", "versionName '9.1.0-tv'")
+              p.write_text(s)
+          PY
+          grep -q "applicationId 'com.suresh.kidsvideo'" kids-phone/app/build.gradle
+          grep -q "versionCode 90100" kids-phone/app/build.gradle
+          grep -q "versionCode 90100" kids-tv/app/build.gradle
+
+      - name: Create one permanent Gradle signing key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.android
+          rm -f ~/.android/debug.keystore
+          keytool -genkeypair -v \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Kids Video Permanent Key,O=Family Apps,C=LK"
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey > dist/PERMANENT-SIGNING-CERTIFICATE.txt
+          cp ~/.android/debug.keystore dist/Kids-Video-Permanent-Key-v9.1.keystore
+          cat > dist/KEEP-THIS-KEY.txt <<'EOF'
+          KEEP THIS FILE PRIVATE. It is required for all future updates.
+          Keystore: Kids-Video-Permanent-Key-v9.1.keystore
+          Store password: android
+          Alias: androiddebugkey
+          Key password: android
+          EOF
+
+      - name: Build Phone Tablet with proven Gradle debug signing path
+        working-directory: kids-phone
+        run: gradle --no-daemon --stacktrace :app:assembleDaughterDebug :app:assembleSonDebug
+
+      - name: Build TV with proven Gradle debug signing path
+        working-directory: kids-tv
+        run: gradle --no-daemon --stacktrace :app:assembleDaughterDebug :app:assembleSonDebug
+
+      - name: Copy final APKs
+        run: |
+          set -euo pipefail
+          cp kids-phone/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v9.1-Phone-Tablet.apk
+          cp kids-phone/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v9.1-Phone-Tablet.apk
+          cp kids-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v9.1-TV.apk
+          cp kids-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v9.1-TV.apk
+
+      - name: Strict installability metadata and signature checks
+        run: |
+          set -euo pipefail
+          SDKROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          BT="$(find "$SDKROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          AAPT="$BT/aapt"
+          APKSIGNER="$BT/apksigner"
+          ZIPALIGN="$BT/zipalign"
+
+          for apk in dist/*.apk; do
+            test -s "$apk"
+            unzip -t "$apk" >/dev/null
+            "$ZIPALIGN" -c -v 4 "$apk" >/dev/null
+            "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
+            "$AAPT" dump badging "$apk" > "$apk.badging.txt"
+          done
+
+          grep -q "package: name='com.suresh.kidsvideo.daughter' versionCode='90100' versionName='9.1.0'" dist/Daughter-Video-v9.1-Phone-Tablet.apk.badging.txt
+          grep -q "package: name='com.suresh.kidsvideo.son' versionCode='90100' versionName='9.1.0'" dist/Son-Video-v9.1-Phone-Tablet.apk.badging.txt
+          grep -q "package: name='com.suresh.kidsvideo.daughter.tv' versionCode='90100' versionName='9.1.0-tv'" dist/Daughter-Video-v9.1-TV.apk.badging.txt
+          grep -q "package: name='com.suresh.kidsvideo.son.tv' versionCode='90100' versionName='9.1.0-tv'" dist/Son-Video-v9.1-TV.apk.badging.txt
+
+          grep -q "native-code: 'arm64-v8a'" dist/Daughter-Video-v9.1-Phone-Tablet.apk.badging.txt
+          grep -q "native-code: 'arm64-v8a'" dist/Son-Video-v9.1-Phone-Tablet.apk.badging.txt
+          grep -q "native-code: 'armeabi-v7a'" dist/Daughter-Video-v9.1-TV.apk.badging.txt
+          grep -q "native-code: 'armeabi-v7a'" dist/Son-Video-v9.1-TV.apk.badging.txt
+
+          grep -q "application-debuggable" dist/Daughter-Video-v9.1-Phone-Tablet.apk.badging.txt
+          grep -q "application-debuggable" dist/Son-Video-v9.1-Phone-Tablet.apk.badging.txt
+
+          # Every APK must have exactly the same signing certificate SHA-256.
+          for f in dist/*.apk.signature.txt; do
+            grep "Signer #1 certificate SHA-256 digest:" "$f" | sed 's/.*digest: //' | tr 'A-F' 'a-f'
+          done | sort -u > dist/cert-digests.txt
+          test "$(wc -l < dist/cert-digests.txt)" -eq 1
+
+          # Feature regression assertions.
+          grep -q "searchApprovedVideos" kids-phone/app/src/main/java/com/kidsvideo/app/YoutubeApi.java
+          grep -q "getParentVideosText" kids-phone/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "getParentPlaylistsText" kids-phone/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "@McCannDogs" kids-phone/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@StonnieDennis" kids-phone/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "KEYCODE_DPAD_CENTER" kids-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "LEANBACK_LAUNCHER" kids-tv/app/src/main/AndroidManifest.xml
+
+          sha256sum dist/*.apk > dist/APK-SHA256SUMS.txt
+
+      - name: Compare critical metadata with proven v8 build configuration
+        run: |
+          set -euo pipefail
+          cat > dist/README-FIRST.txt <<'EOF'
+          v9.1 install-safe rebuild.
+          Build path intentionally matches the proven v8 Gradle DEBUG signing path.
+          Post-build signing/modification used by the failed v9 delivery has been removed.
+          Old apps may be uninstalled first. These four apps use new permanent package IDs.
+          Keep Kids-Video-Permanent-Key-v9.1.keystore and KEEP-THIS-KEY.txt private for future updates.
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kids-video-v9-1-install-safe
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

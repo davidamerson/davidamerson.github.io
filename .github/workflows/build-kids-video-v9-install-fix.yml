@@ -42,11 +42,9 @@ jobs:
           set -euo pipefail
           rm -rf kids-phone kids-tv dist
           mkdir -p kids-phone dist
-
           cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-v8-source.tar.gz
           echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-v8-source.tar.gz" | sha256sum -c -
           tar -xzf /tmp/kids-video-v8-source.tar.gz -C kids-phone
-
           cat \
             v9-phone-patch-small/00.b64 \
             v9-phone-patch-safe/01-0.b64 \
@@ -61,7 +59,6 @@ jobs:
             | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/v9phone.patch
           echo "0b882150b2011293381814a2c7cbb04e0248abefed08fc57d8d82cc7252afc79  /tmp/v9phone.patch" | sha256sum -c -
           (cd kids-phone && patch -p1 < /tmp/v9phone.patch)
-
           if ! grep -q 'maven.mozilla.org' kids-phone/settings.gradle; then
             sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-phone/settings.gradle
           fi
@@ -123,7 +120,7 @@ jobs:
 
       - name: Copy and deeply verify final APKs
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           AAPT="$BT/aapt"
           APKSIGNER="$BT/apksigner"
@@ -137,12 +134,21 @@ jobs:
           for apk in dist/*.apk; do
             test -s "$apk"
             unzip -t "$apk" >/dev/null
-            "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
-            "$ZIPALIGN" -c -P 16 -v 4 "$apk" > "$apk.zipalign.txt"
-            "$AAPT" dump badging "$apk" > "$apk.badging.txt"
+            "$APKSIGNER" verify --verbose --print-certs "$apk" | tee "$apk.signature.txt"
+            "$ZIPALIGN" -c -P 16 -v 4 "$apk" | tee "$apk.zipalign.txt"
+            "$AAPT" dump badging "$apk" | tee "$apk.badging.txt"
             grep -q "application-label:" "$apk.badging.txt"
-            grep -q "launchable-activity:" "$apk.badging.txt"
           done
+
+          # Phone/tablet variants use the standard Android launcher.
+          grep -q "launchable-activity:" dist/Daughter-Video-v9.0.1-Phone-Tablet.apk.badging.txt
+          grep -q "launchable-activity:" dist/Son-Video-v9.0.1-Phone-Tablet.apk.badging.txt
+
+          # TV variants intentionally use LEANBACK_LAUNCHER instead of the phone LAUNCHER.
+          grep -q "leanback-launchable-activity:" dist/Daughter-Video-v9.0.1-TV.apk.badging.txt
+          grep -q "leanback-launchable-activity:" dist/Son-Video-v9.0.1-TV.apk.badging.txt
+          grep -q "uses-feature: name='android.software.leanback'" dist/Daughter-Video-v9.0.1-TV.apk.badging.txt
+          grep -q "uses-feature: name='android.software.leanback'" dist/Son-Video-v9.0.1-TV.apk.badging.txt
 
           grep -q "package: name='com.suresh.kidsvideo.daughter'" dist/Daughter-Video-v9.0.1-Phone-Tablet.apk.badging.txt
           grep -q "package: name='com.suresh.kidsvideo.son'" dist/Son-Video-v9.0.1-Phone-Tablet.apk.badging.txt
@@ -154,7 +160,7 @@ jobs:
           unzip -l dist/Daughter-Video-v9.0.1-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
           unzip -l dist/Son-Video-v9.0.1-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
 
-          # Prove all four APKs have the exact same signing certificate.
+          rm -f /tmp/certs.txt
           for apk in dist/*.apk; do
             "$APKSIGNER" verify --print-certs "$apk" | grep 'Signer #1 certificate SHA-256 digest:' | sed 's/.*: //' >> /tmp/certs.txt
           done
@@ -163,7 +169,6 @@ jobs:
           cp ~/.android/debug.keystore dist/Kids-Video-v9.0.1-Signing-Key-KEEP-PRIVATE.keystore
           cp /tmp/signing-cert.txt dist/SIGNING-CERTIFICATE.txt
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-
           echo 'These APKs use the same Gradle DEBUG build/sign path as the last working app family, not the failed post-signed release method.' > dist/README-INSTALL.txt
           echo 'Uninstall the four failed v9.0.0 APKs first if Android shows them as installed, then install these v9.0.1 APKs.' >> dist/README-INSTALL.txt
 

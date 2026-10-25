@@ -5,6 +5,7 @@ on:
   push:
     branches: [ "kids-video-tv-final" ]
     paths:
+      - "v9-tv-patch-parts/**"
       - ".github/workflows/build-kids-video-tv.yml"
 
 jobs:
@@ -35,20 +36,29 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Restore v9 phone source and apply verified v8.3 TV delta
+      - name: Restore proven v8 source, apply v9 features and TV delta
         run: |
           rm -rf kids-video-tv
           mkdir -p kids-video-tv
-          curl --fail --location --retry 3 -o /tmp/final-source-v9.b64 https://raw.githubusercontent.com/davidamerson/davidamerson.github.io/kids-video-final/final-source-v9.b64
-          tr -d '\n\r ' < /tmp/final-source-v9.b64 | base64 -d > /tmp/kids-video-v9-source.tar.gz
-          echo "963b29f5117bcb0c69fd540e362dc4e5f4ac1f5aa289c833c9eb1c4915d52f37  /tmp/kids-video-v9-source.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/kids-video-v9-source.tar.gz -C kids-video-tv
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-v8-source.tar.gz
+          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-v8-source.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kids-video-v8-source.tar.gz -C kids-video-tv
 
-          cat > /tmp/tv.patch.gz.b64 <<'PATCH64'
-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
-PATCH64
-          tr -d '\n\r ' < /tmp/tv.patch.gz.b64 | base64 -d | gzip -d > /tmp/tv.patch
+          rm -f /tmp/v9phone.patch.gz.b64
+          for part in 00 01; do
+            curl --fail --location --retry 3 "https://raw.githubusercontent.com/davidamerson/davidamerson.github.io/kids-video-final/v9-phone-patch-parts/${part}.b64" >> /tmp/v9phone.patch.gz.b64
+          done
+          tr -d '\n\r ' < /tmp/v9phone.patch.gz.b64 | base64 -d | gzip -d > /tmp/v9phone.patch
+          echo "4b0a14e83c9cf5dc2e7fd2502b61241c232f4a8c0dca984381060120051c4c04  /tmp/v9phone.patch" | sha256sum -c -
+          (cd kids-video-tv && patch -p1 < /tmp/v9phone.patch)
+
+          cat v9-tv-patch-parts/*.b64 | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/tv.patch
+          echo "d038ef43d731d2306b7c00edb75965e8a2dfe24559a776fbb0862a23802bbc78  /tmp/tv.patch" | sha256sum -c -
           (cd kids-video-tv && patch -p1 < /tmp/tv.patch)
+
+          if ! grep -q 'maven.mozilla.org' kids-video-tv/settings.gradle; then
+            sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-video-tv/settings.gradle
+          fi
 
           grep -q "versionName '9.0.0-tv'" kids-video-tv/app/build.gradle
           grep -q "versionCode 90000" kids-video-tv/app/build.gradle

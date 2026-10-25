@@ -1,11 +1,11 @@
-name: Build Kids Video Final APKs
+name: Build Kids Video v9 Phone Tablet APKs
 
 on:
   workflow_dispatch:
   push:
     branches: [ "kids-video-final" ]
     paths:
-      - "final-source-parts/**"
+      - "final-source-v9.b64"
       - ".github/workflows/build-kids-video-v4.yml"
 
 jobs:
@@ -29,48 +29,52 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Restore final source tree
+      - name: Restore and verify v9 source
         run: |
-          rm -rf kids-video-final
-          mkdir -p kids-video-final
-          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-final-source.tar.gz
-          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-final-source.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/kids-video-final-source.tar.gz -C kids-video-final
-          sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-video-final/settings.gradle
-          test -f kids-video-final/app/build.gradle
-          grep -q "maven.mozilla.org" kids-video-final/settings.gradle
-          grep -q "versionName '8.0.0'" kids-video-final/app/build.gradle
-          grep -q "geckoview-beta-arm64-v8a" kids-video-final/app/build.gradle
-          grep -q "network.http.http3.enable" kids-video-final/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
-          grep -q "EXTRA_PARENT_SIGN_IN" kids-video-final/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
-          grep -q "kidslock" kids-video-final/app/src/main/assets/kidslock/content.js
-          grep -q "isYoutubeSignInDone" kids-video-final/app/src/main/java/com/kidsvideo/app/Prefs.java
-          ! grep -R -q "TextToSpeech\|startEnglishCoach\|Speak English" kids-video-final/app/src/main/java
-          grep -q "Stories & Cartoons" kids-video-final/app/src/main/java/com/kidsvideo/app/MainActivity.java
-          grep -q "Mark Rober" kids-video-final/app/src/main/java/com/kidsvideo/app/AppProfile.java
-          grep -q "Bluey - Official Channel" kids-video-final/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          rm -rf kids-video-v9
+          mkdir -p kids-video-v9
+          tr -d '\n\r ' < final-source-v9.b64 | base64 -d > /tmp/kids-video-v9-source.tar.gz
+          echo "963b29f5117bcb0c69fd540e362dc4e5f4ac1f5aa289c833c9eb1c4915d52f37  /tmp/kids-video-v9-source.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kids-video-v9-source.tar.gz -C kids-video-v9
+          sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-video-v9/settings.gradle
 
-      - name: Build Daughter and Son APKs
-        working-directory: kids-video-final
+          test -f kids-video-v9/app/build.gradle
+          grep -q "versionName '9.0.0'" kids-video-v9/app/build.gradle
+          grep -q "versionCode 90000" kids-video-v9/app/build.gradle
+          grep -q "geckoview-beta-arm64-v8a" kids-video-v9/app/build.gradle
+          grep -q "network.http.http3.enable" kids-video-v9/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "EXTRA_PARENT_SIGN_IN" kids-video-v9/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "kidslock" kids-video-v9/app/src/main/assets/kidslock/content.js
+          grep -q "searchApprovedVideos" kids-video-v9/app/src/main/java/com/kidsvideo/app/YoutubeApi.java
+          grep -q "getParentVideosText" kids-video-v9/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "getParentPlaylistsText" kids-video-v9/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "ensureV9RequestedChannelDefaults" kids-video-v9/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "@McCannDogs" kids-video-v9/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@StonnieDennis" kids-video-v9/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@WolfooFamilyOffical" kids-video-v9/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "Bluey - Official Channel" kids-video-v9/app/src/main/java/com/kidsvideo/app/AppProfile.java
+
+      - name: Build Daughter and Son phone tablet APKs
+        working-directory: kids-video-v9
         run: gradle --no-daemon --stacktrace :app:assembleDaughterDebug :app:assembleSonDebug
 
       - name: Package and verify outputs
         run: |
           mkdir -p dist
-          cp kids-video-final/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-Final.apk
-          cp kids-video-final/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-Final.apk
-          test -s dist/Daughter-Video-Final.apk
-          test -s dist/Son-Video-Final.apk
-          unzip -t dist/Daughter-Video-Final.apk >/dev/null
-          unzip -t dist/Son-Video-Final.apk >/dev/null
+          cp kids-video-v9/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v9-Phone-Tablet.apk
+          cp kids-video-v9/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v9-Phone-Tablet.apk
+          test -s dist/Daughter-Video-v9-Phone-Tablet.apk
+          test -s dist/Son-Video-v9-Phone-Tablet.apk
+          unzip -t dist/Daughter-Video-v9-Phone-Tablet.apk >/dev/null
+          unzip -t dist/Son-Video-v9-Phone-Tablet.apk >/dev/null
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          keytool -printcert -jarfile dist/Daughter-Video-Final.apk > dist/SIGNING-CERT-Daughter.txt
-          keytool -printcert -jarfile dist/Son-Video-Final.apk > dist/SIGNING-CERT-Son.txt
-          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-Final-Source.tar.gz -C kids-video-final .
+          keytool -printcert -jarfile dist/Daughter-Video-v9-Phone-Tablet.apk > dist/SIGNING-CERT-Daughter.txt
+          keytool -printcert -jarfile dist/Son-Video-v9-Phone-Tablet.apk > dist/SIGNING-CERT-Son.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v9-Phone-Source.tar.gz -C kids-video-v9 .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kids-video-final-apks
+          name: kids-video-v9-phone-tablet
           path: dist/
           if-no-files-found: error
           retention-days: 30

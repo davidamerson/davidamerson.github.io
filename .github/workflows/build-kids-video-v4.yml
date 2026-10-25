@@ -5,7 +5,7 @@ on:
   push:
     branches: [ "kids-video-final" ]
     paths:
-      - "final-source-v9.b64"
+      - "v9-phone-patch-parts/**"
       - ".github/workflows/build-kids-video-v4.yml"
 
 jobs:
@@ -29,14 +29,21 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Restore and verify v9 source
+      - name: Restore proven v8 source and apply v9 feature patch
         run: |
           rm -rf kids-video-v9
           mkdir -p kids-video-v9
-          tr -d '\n\r ' < final-source-v9.b64 | base64 -d > /tmp/kids-video-v9-source.tar.gz
-          echo "963b29f5117bcb0c69fd540e362dc4e5f4ac1f5aa289c833c9eb1c4915d52f37  /tmp/kids-video-v9-source.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/kids-video-v9-source.tar.gz -C kids-video-v9
-          sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-video-v9/settings.gradle
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-v8-source.tar.gz
+          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-v8-source.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kids-video-v8-source.tar.gz -C kids-video-v9
+
+          cat v9-phone-patch-parts/*.b64 | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/v9phone.patch
+          echo "4b0a14e83c9cf5dc2e7fd2502b61241c232f4a8c0dca984381060120051c4c04  /tmp/v9phone.patch" | sha256sum -c -
+          (cd kids-video-v9 && patch -p1 < /tmp/v9phone.patch)
+
+          if ! grep -q 'maven.mozilla.org' kids-video-v9/settings.gradle; then
+            sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-video-v9/settings.gradle
+          fi
 
           test -f kids-video-v9/app/build.gradle
           grep -q "versionName '9.0.0'" kids-video-v9/app/build.gradle
@@ -67,6 +74,8 @@ jobs:
           test -s dist/Son-Video-v9-Phone-Tablet.apk
           unzip -t dist/Daughter-Video-v9-Phone-Tablet.apk >/dev/null
           unzip -t dist/Son-Video-v9-Phone-Tablet.apk >/dev/null
+          unzip -l dist/Daughter-Video-v9-Phone-Tablet.apk | grep -q 'lib/arm64-v8a/libxul.so'
+          unzip -l dist/Son-Video-v9-Phone-Tablet.apk | grep -q 'lib/arm64-v8a/libxul.so'
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
           keytool -printcert -jarfile dist/Daughter-Video-v9-Phone-Tablet.apk > dist/SIGNING-CERT-Daughter.txt
           keytool -printcert -jarfile dist/Son-Video-v9-Phone-Tablet.apk > dist/SIGNING-CERT-Son.txt

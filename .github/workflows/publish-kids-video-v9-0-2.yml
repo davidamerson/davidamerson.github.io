@@ -1,0 +1,52 @@
+name: Publish Kids Video v9.0.2 APKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-final" ]
+    paths:
+      - ".github/workflows/publish-kids-video-v9-0-2.yml"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download verified final build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kids-video-v9-0-2-final-install-fix
+          path: final
+          run-id: 40191024318
+          github-token: ${{ github.token }}
+
+      - name: Recheck APK files before release
+        run: |
+          set -euo pipefail
+          ls -lh final
+          test -s final/Daughter-Video-v9.0.2-Phone-Tablet.apk
+          test -s final/Son-Video-v9.0.2-Phone-Tablet.apk
+          test -s final/Daughter-Video-v9.0.2-TV.apk
+          test -s final/Son-Video-v9.0.2-TV.apk
+          for apk in final/*.apk; do unzip -t "$apk" >/dev/null; done
+          sha256sum -c final/APK-SHA256SUMS.txt
+
+      - name: Create release and upload only APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="kids-video-v9.0.2-install-fix"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            final/Daughter-Video-v9.0.2-Phone-Tablet.apk \
+            final/Son-Video-v9.0.2-Phone-Tablet.apk \
+            final/Daughter-Video-v9.0.2-TV.apk \
+            final/Son-Video-v9.0.2-TV.apk \
+            --title "Kids Video v9.0.2 Install Fix" \
+            --notes "Fresh install-fix builds. Built through the same Gradle DEBUG packaging/signing path as the proven working app family. New v9 features retained. Signing-key backup is intentionally NOT published in this public release."

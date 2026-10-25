@@ -1,0 +1,147 @@
+name: Build Son Tablet v9.0.3 Universal
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-final" ]
+    paths:
+      - ".github/workflows/build-son-tablet-v9-0-3.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Create dedicated tablet signing key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.android tablet-key dist
+          rm -f ~/.android/debug.keystore
+          keytool -genkeypair -v \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Kids Video Son Tablet Permanent,O=Suresh Kids Video,C=LK"
+          cp ~/.android/debug.keystore tablet-key/Son-Tablet-Permanent-Key.keystore
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey > tablet-key/Son-Tablet-Key-Certificate.txt
+
+      - name: Restore proven working phone source and apply v9 features
+        run: |
+          set -euo pipefail
+          rm -rf kids-tablet
+          mkdir -p kids-tablet
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/v8.tar.gz
+          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/v8.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/v8.tar.gz -C kids-tablet
+          cat \
+            v9-phone-patch-small/00.b64 \
+            v9-phone-patch-safe/01-0.b64 \
+            v9-phone-patch-safe/01-1.b64 \
+            v9-phone-patch-safe/01-2.b64 \
+            v9-phone-patch-safe/01-3.b64 \
+            v9-phone-patch-small/02.b64 \
+            v9-phone-patch-safe/03-0.b64 \
+            v9-phone-patch-safe/03-1.b64 \
+            v9-phone-patch-safe/03-2.b64 \
+            v9-phone-patch-safe/03-3.b64 \
+            | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/v9.patch
+          echo "0b882150b2011293381814a2c7cbb04e0248abefed08fc57d8d82cc7252afc79  /tmp/v9.patch" | sha256sum -c -
+          (cd kids-tablet && patch -p1 < /tmp/v9.patch)
+          if ! grep -q 'maven.mozilla.org' kids-tablet/settings.gradle; then
+            sed -i "s#mavenCentral()#mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }#g" kids-tablet/settings.gradle
+          fi
+
+      - name: Convert Son build to dedicated universal tablet app
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('kids-tablet/app/build.gradle')
+          s=p.read_text()
+          s=s.replace("applicationId 'com.kidsvideo.app'", "applicationId 'com.suresh.kidsvideo'")
+          s=s.replace("applicationIdSuffix '.son'", "applicationIdSuffix '.son.tablet'")
+          s=s.replace("versionCode 90000", "versionCode 90300")
+          s=s.replace("versionName '9.0.0'", "versionName '9.0.3-tablet'")
+          # Replace any existing ABI filter with a universal Android-tablet set.
+          s=re.sub(r"abiFilters\s+[^\n\r}]+", "abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'", s)
+          p.write_text(s)
+          print(s)
+          PY
+          grep -q "applicationIdSuffix '.son.tablet'" kids-tablet/app/build.gradle
+          grep -q "versionName '9.0.3-tablet'" kids-tablet/app/build.gradle
+
+      - name: Assert Son profile and all requested v9 features
+        run: |
+          set -euo pipefail
+          grep -q "searchApprovedVideos" kids-tablet/app/src/main/java/com/kidsvideo/app/YoutubeApi.java
+          grep -q "getParentVideosText" kids-tablet/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "getParentPlaylistsText" kids-tablet/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "@McCannDogs" kids-tablet/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@StonnieDennis" kids-tablet/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@WolfooFamilyOffical" kids-tablet/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "network.http.http3.enable" kids-tablet/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          grep -q "EXTRA_PARENT_SIGN_IN" kids-tablet/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+
+      - name: Build dedicated Son tablet APK through proven Gradle DEBUG path
+        working-directory: kids-tablet
+        run: gradle --no-daemon --stacktrace :app:assembleSonDebug
+
+      - name: Verify tablet APK install metadata and native compatibility
+        run: |
+          set -euo pipefail
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          APK="kids-tablet/app/build/outputs/apk/son/debug/app-son-debug.apk"
+          OUT="dist/Son-Video-v9.0.3-Tablet-Universal.apk"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          unzip -t "$OUT" >/dev/null
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" > dist/Son-Tablet-Signature.txt
+          "$BT/zipalign" -c -P 16 -v 4 "$OUT" > dist/Son-Tablet-Zipalign.txt
+          "$BT/aapt" dump badging "$OUT" > dist/Son-Tablet-Badging.txt
+          grep -q "package: name='com.suresh.kidsvideo.son.tablet'" dist/Son-Tablet-Badging.txt
+          grep -q "launchable-activity:" dist/Son-Tablet-Badging.txt
+          grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" dist/Son-Tablet-Signature.txt
+
+          echo '--- ABI libraries included ---'
+          unzip -l "$OUT" | grep -E 'lib/(armeabi-v7a|arm64-v8a|x86|x86_64)/libxul.so' | tee dist/Son-Tablet-ABI-Libraries.txt
+          grep -q 'lib/armeabi-v7a/libxul.so' dist/Son-Tablet-ABI-Libraries.txt
+          grep -q 'lib/arm64-v8a/libxul.so' dist/Son-Tablet-ABI-Libraries.txt
+
+          sha256sum "$OUT" > dist/Son-Tablet-SHA256.txt
+
+      - name: Save private tablet signing key as separate Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: son-tablet-private-signing-key-v9-0-3
+          path: tablet-key/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish direct APK release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="kids-video-son-tablet-v9.0.3"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            dist/Son-Video-v9.0.3-Tablet-Universal.apk \
+            --title "Kids Video Son Tablet v9.0.3" \
+            --notes "Dedicated Son tablet build. Separate package ID com.suresh.kidsvideo.son.tablet. Universal ARM32/ARM64 tablet compatibility, same proven playback path and v9 features."

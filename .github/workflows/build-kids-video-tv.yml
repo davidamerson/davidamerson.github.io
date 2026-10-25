@@ -1,11 +1,10 @@
-name: Build Kids Video TV APKs
+name: Build Kids Video v9 TV APKs
 
 on:
   workflow_dispatch:
   push:
     branches: [ "kids-video-tv-final" ]
     paths:
-      - "final-source-parts/**"
       - ".github/workflows/build-kids-video-tv.yml"
 
 jobs:
@@ -36,111 +35,23 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Restore and convert final source to TV-only ARMv7 with remote controls and focus highlight
+      - name: Restore v9 phone source and apply verified v8.3 TV delta
         run: |
           rm -rf kids-video-tv
           mkdir -p kids-video-tv
-          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/kids-video-final-source.tar.gz
-          echo "1c8337eca88b20503fa75b26ea211ceea0f5ada2518e15f25b32ccfe4bae4714  /tmp/kids-video-final-source.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/kids-video-final-source.tar.gz -C kids-video-tv
-          python3 - <<'PY'
-          from pathlib import Path
+          curl --fail --location --retry 3 -o /tmp/final-source-v9.b64 https://raw.githubusercontent.com/davidamerson/davidamerson.github.io/kids-video-final/final-source-v9.b64
+          tr -d '\n\r ' < /tmp/final-source-v9.b64 | base64 -d > /tmp/kids-video-v9-source.tar.gz
+          echo "963b29f5117bcb0c69fd540e362dc4e5f4ac1f5aa289c833c9eb1c4915d52f37  /tmp/kids-video-v9-source.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kids-video-v9-source.tar.gz -C kids-video-tv
 
-          root = Path('kids-video-tv')
-          gradle = root / 'app/build.gradle'
-          text = gradle.read_text()
-          text = text.replace("versionCode 80000", "versionCode 83000")
-          text = text.replace("versionName '8.0.0'", "versionName '8.3.0-tv'")
-          text = text.replace("applicationIdSuffix '.daughter'", "applicationIdSuffix '.daughter.tv'")
-          text = text.replace("applicationIdSuffix '.son'", "applicationIdSuffix '.son.tv'")
-          text = text.replace("resValue 'string', 'app_name', 'Daughter Video'", "resValue 'string', 'app_name', 'Daughter Video TV'")
-          text = text.replace("resValue 'string', 'app_name', 'Son Video'", "resValue 'string', 'app_name', 'Son Video TV'")
-          text = text.replace("implementation 'org.mozilla.geckoview:geckoview-beta-arm64-v8a:148.0.20260204091025'", "implementation 'org.mozilla.geckoview:geckoview-beta-armeabi-v7a:148.0.20260204091025'")
-          text = text.replace("targetSdk 36\n        versionCode", "targetSdk 36\n        ndk { abiFilters 'armeabi-v7a' }\n        versionCode")
-          gradle.write_text(text)
+          cat > /tmp/tv.patch.gz.b64 <<'PATCH64'
+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
+PATCH64
+          tr -d '\n\r ' < /tmp/tv.patch.gz.b64 | base64 -d | gzip -d > /tmp/tv.patch
+          (cd kids-video-tv && patch -p1 < /tmp/tv.patch)
 
-          settings = root / 'settings.gradle'
-          s = settings.read_text()
-          if 'maven.mozilla.org' not in s:
-              s = s.replace('mavenCentral()', "mavenCentral()\n        maven { url 'https://maven.mozilla.org/maven2/' }")
-          settings.write_text(s)
-
-          manifest = root / 'app/src/main/AndroidManifest.xml'
-          m = manifest.read_text()
-          m = m.replace('android.software.leanback" android:required="false"', 'android.software.leanback" android:required="true"')
-          m = m.replace('android:name=".BrowserPlaybackActivity"\n            android:configChanges=', 'android:name=".BrowserPlaybackActivity"\n            android:screenOrientation="landscape"\n            android:configChanges=')
-          m = m.replace('android:name=".MainActivity"\n            android:configChanges=', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"\n            android:configChanges=')
-          phone_filter = '''            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n'''
-          m = m.replace(phone_filter, '')
-          manifest.write_text(m)
-
-          # TV remote support in Gecko playback activity.
-          java = root / 'app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java'
-          j = java.read_text()
-          j = j.replace('import android.view.Gravity;\n', 'import android.view.Gravity;\nimport android.view.KeyEvent;\nimport android.view.MotionEvent;\n')
-          j = j.replace('        geckoView.setSession(session);\n', '''        geckoView.setSession(session);\n\n        geckoView.setFocusable(true);\n        geckoView.setFocusableInTouchMode(true);\n        geckoView.requestFocus();\n''')
-          marker = '    private void immersive(boolean hide) {'
-          remote_methods = '''    @Override public boolean dispatchKeyEvent(KeyEvent event) {\n        if (!parentMode && geckoView != null &&\n                event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {\n            int key = event.getKeyCode();\n            if (key == KeyEvent.KEYCODE_DPAD_CENTER ||\n                    key == KeyEvent.KEYCODE_ENTER ||\n                    key == KeyEvent.KEYCODE_NUMPAD_ENTER ||\n                    key == KeyEvent.KEYCODE_SPACE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||\n                    key == KeyEvent.KEYCODE_MEDIA_PLAY ||\n                    key == KeyEvent.KEYCODE_MEDIA_PAUSE) {\n                tapPlayerCenter();\n                return true;\n            }\n        }\n        return super.dispatchKeyEvent(event);\n    }\n\n    private void tapPlayerCenter() {\n        if (geckoView == null || geckoView.getWidth() <= 0 || geckoView.getHeight() <= 0) return;\n        geckoView.requestFocus();\n        long now = SystemClock.uptimeMillis();\n        float x = geckoView.getWidth() / 2f;\n        float y = geckoView.getHeight() / 2f;\n        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);\n        MotionEvent up = MotionEvent.obtain(now, now + 70, MotionEvent.ACTION_UP, x, y, 0);\n        try {\n            geckoView.dispatchTouchEvent(down);\n            geckoView.dispatchTouchEvent(up);\n        } finally {\n            down.recycle();\n            up.recycle();\n        }\n    }\n\n'''
-          if marker not in j:
-              raise SystemExit('Could not find immersive method marker')
-          j = j.replace(marker, remote_methods + marker)
-          java.write_text(j)
-
-          # Remote arrow-key support inside the locked YouTube page.
-          js = root / 'app/src/main/assets/kidslock/content.js'
-          c = js.read_text()
-          remote_js = r'''\n\n  function tvVideo() { return document.querySelector('video.html5-main-video, video'); }\n  function revealTvControls() {\n    const player = document.querySelector('.html5-video-player');\n    if (!player) return;\n    try {\n      player.classList.remove('ytp-autohide');\n      player.classList.add('ytp-user-active');\n      player.dispatchEvent(new MouseEvent('mousemove', {bubbles:true, clientX:Math.floor(innerWidth / 2), clientY:Math.floor(innerHeight / 2)}));\n    } catch (_) {}\n  }\n  document.addEventListener('keydown', ev => {\n    const video = tvVideo(); if (!video) return; const key = ev.key || '';\n    if (key === 'ArrowLeft') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.currentTime = Math.max(0, video.currentTime - 10); } catch (_) {} revealTvControls(); return; }\n    if (key === 'ArrowRight') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.currentTime = Math.min(isFinite(video.duration) ? video.duration : video.currentTime + 10, video.currentTime + 10); } catch (_) {} revealTvControls(); return; }\n    if (key === 'ArrowUp' || key === 'ArrowDown') { ev.preventDefault(); ev.stopImmediatePropagation(); revealTvControls(); return; }\n    if (key === 'MediaPlay') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.play(); } catch (_) {} revealTvControls(); return; }\n    if (key === 'MediaPause') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.pause(); } catch (_) {} revealTvControls(); return; }\n    if (key === 'MediaPlayPause' || key === ' ' || key === 'Enter') { ev.preventDefault(); ev.stopImmediatePropagation(); try { video.paused ? video.play() : video.pause(); } catch (_) {} revealTvControls(); }\n  }, true);\n'''
-          close = '\n})();\n'
-          if close not in c:
-              raise SystemExit('Could not find kidslock script end')
-          c = c.replace(close, remote_js + close)
-          js.write_text(c)
-
-          # Strong TV focus indicator for video cards.
-          va = root / 'app/src/main/java/com/kidsvideo/app/VideoAdapter.java'
-          v = va.read_text()
-          badge_anchor = '''            card.addView(h.star, sp);\n\n            card.setTag(h);'''
-          badge_block = '''            card.addView(h.star, sp);\n\n            h.focusBadge = new TextView(context);\n            h.focusBadge.setText("SELECTED");\n            h.focusBadge.setTextColor(Color.BLACK);\n            h.focusBadge.setTextSize(tv ? 13f : 11f);\n            h.focusBadge.setTypeface(null, android.graphics.Typeface.BOLD);\n            h.focusBadge.setGravity(Gravity.CENTER);\n            h.focusBadge.setPadding(dp(10), dp(3), dp(10), dp(3));\n            h.focusBadge.setFocusable(false);\n            h.focusBadge.setClickable(false);\n            GradientDrawable focusBadgeBg = new GradientDrawable();\n            focusBadgeBg.setColor(Color.rgb(255, 214, 64));\n            focusBadgeBg.setCornerRadius(dp(13));\n            focusBadgeBg.setStroke(dp(1), Color.WHITE);\n            h.focusBadge.setBackground(focusBadgeBg);\n            h.focusBadge.setVisibility(View.GONE);\n            FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(34), Gravity.TOP | Gravity.START);\n            fp.setMargins(dp(10), dp(10), 0, 0);\n            card.addView(h.focusBadge, fp);\n\n            card.setTag(h);'''
-          if badge_anchor not in v:
-              raise SystemExit('VideoAdapter badge anchor not found')
-          v = v.replace(badge_anchor, badge_block)
-
-          old_focus = '''        convertView.setOnFocusChangeListener((v, hasFocus) -> {\n            v.setBackground(cardBackground(hasFocus));\n            v.setScaleX(hasFocus ? 1.035f : 1f);\n            v.setScaleY(hasFocus ? 1.035f : 1f);\n            v.setElevation(hasFocus ? dp(9) : dp(1));\n        });'''
-          new_focus = '''        final Holder holder = h;\n        convertView.setOnFocusChangeListener((v, hasFocus) -> applyFocusStyle(v, holder, hasFocus));\n        applyFocusStyle(convertView, h, convertView.hasFocus());'''
-          if old_focus not in v:
-              raise SystemExit('VideoAdapter focus listener anchor not found')
-          v = v.replace(old_focus, new_focus)
-
-          shutdown_anchor = '    void shutdown() { imagePool.shutdownNow(); }\n'
-          focus_method = '''    private void applyFocusStyle(View v, Holder h, boolean hasFocus) {\n        v.setBackground(cardBackground(hasFocus));\n        float scale = hasFocus ? (tv ? 1.075f : 1.035f) : 1f;\n        v.animate().scaleX(scale).scaleY(scale).setDuration(tv ? 110 : 80).start();\n        v.setElevation(hasFocus ? dp(tv ? 18 : 9) : dp(1));\n        v.setAlpha(tv && !hasFocus ? 0.88f : 1f);\n        if (h.focusBadge != null) h.focusBadge.setVisibility(tv && hasFocus ? View.VISIBLE : View.GONE);\n        h.title.setTextColor(tv && hasFocus ? Color.rgb(255, 224, 92) : Color.WHITE);\n        h.title.setTypeface(null, tv && hasFocus ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);\n        h.meta.setTextColor(tv && hasFocus ? Color.WHITE : Color.rgb(185, 188, 196));\n    }\n\n    void shutdown() { imagePool.shutdownNow(); }\n'''
-          if shutdown_anchor not in v:
-              raise SystemExit('VideoAdapter shutdown anchor not found')
-          v = v.replace(shutdown_anchor, focus_method)
-
-          old_bg = '''        g.setColor(focused ? Color.rgb(40, 58, 92) : Color.rgb(30, 31, 36));\n        g.setCornerRadius(dp(12));\n        g.setStroke(dp(focused ? 3 : 1), focused ? Color.rgb(105, 170, 255) : Color.rgb(62, 64, 73));'''
-          new_bg = '''        g.setColor(focused ? (tv ? Color.rgb(24, 52, 92) : Color.rgb(40, 58, 92)) : Color.rgb(30, 31, 36));\n        g.setCornerRadius(dp(12));\n        int stroke = focused ? (tv ? 5 : 3) : 1;\n        int strokeColor = focused ? (tv ? Color.rgb(255, 214, 64) : Color.rgb(105, 170, 255)) : Color.rgb(62, 64, 73);\n        g.setStroke(dp(stroke), strokeColor);'''
-          if old_bg not in v:
-              raise SystemExit('VideoAdapter background anchor not found')
-          v = v.replace(old_bg, new_bg)
-
-          holder_anchor = '''        TextView meta;\n        TextView star;'''
-          holder_repl = '''        TextView meta;\n        TextView star;\n        TextView focusBadge;'''
-          if holder_anchor not in v:
-              raise SystemExit('VideoAdapter holder anchor not found')
-          v = v.replace(holder_anchor, holder_repl)
-          va.write_text(v)
-
-          # Make top/menu/category controls visibly move when remote focus lands on them.
-          ma = root / 'app/src/main/java/com/kidsvideo/app/MainActivity.java'
-          q = ma.read_text()
-          old_button = '''        b.setText(text); b.setTextColor(Color.WHITE); b.setTextSize(tv ? 15f : 13f); b.setAllCaps(false); b.setFocusable(true);\n        return b;'''
-          new_button = '''        b.setText(text); b.setTextColor(Color.WHITE); b.setTextSize(tv ? 15f : 13f); b.setAllCaps(false); b.setFocusable(true);\n        if (tv) b.setOnFocusChangeListener((v, hasFocus) -> {\n            float s = hasFocus ? 1.08f : 1f;\n            v.animate().scaleX(s).scaleY(s).setDuration(100).start();\n            v.setAlpha(hasFocus ? 1f : 0.88f);\n            v.setElevation(hasFocus ? dp(10) : dp(1));\n        });\n        return b;'''
-          if old_button not in q:
-              raise SystemExit('MainActivity button anchor not found')
-          q = q.replace(old_button, new_button)
-          ma.write_text(q)
-          PY
-          grep -q "versionName '8.3.0-tv'" kids-video-tv/app/build.gradle
+          grep -q "versionName '9.0.0-tv'" kids-video-tv/app/build.gradle
+          grep -q "versionCode 90000" kids-video-tv/app/build.gradle
           grep -q "geckoview-beta-armeabi-v7a" kids-video-tv/app/build.gradle
           grep -q "abiFilters 'armeabi-v7a'" kids-video-tv/app/build.gradle
           grep -q "applicationIdSuffix '.daughter.tv'" kids-video-tv/app/build.gradle
@@ -155,10 +66,13 @@ jobs:
           grep -q "SELECTED" kids-video-tv/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
           grep -q "1.075f" kids-video-tv/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
           grep -q "255, 214, 64" kids-video-tv/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
-          grep -q "1.08f" kids-video-tv/app/src/main/java/com/kidsvideo/app/MainActivity.java
+          grep -q "searchApprovedVideos" kids-video-tv/app/src/main/java/com/kidsvideo/app/YoutubeApi.java
+          grep -q "getParentVideosText" kids-video-tv/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "getParentPlaylistsText" kids-video-tv/app/src/main/java/com/kidsvideo/app/Prefs.java
+          grep -q "@McCannDogs" kids-video-tv/app/src/main/java/com/kidsvideo/app/AppProfile.java
+          grep -q "@StonnieDennis" kids-video-tv/app/src/main/java/com/kidsvideo/app/AppProfile.java
           grep -q "network.http.http3.enable" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
           grep -q "EXTRA_PARENT_SIGN_IN" kids-video-tv/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
-          ! grep -R -q "TextToSpeech\|startEnglishCoach\|Speak English" kids-video-tv/app/src/main/java
 
       - name: Build TV Daughter and Son APKs
         working-directory: kids-video-tv
@@ -167,24 +81,24 @@ jobs:
       - name: Verify ARMv7-only TV APKs
         run: |
           mkdir -p dist
-          cp kids-video-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-TV-v8.3.apk
-          cp kids-video-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-TV-v8.3.apk
-          test -s dist/Daughter-Video-TV-v8.3.apk
-          test -s dist/Son-Video-TV-v8.3.apk
-          unzip -t dist/Daughter-Video-TV-v8.3.apk >/dev/null
-          unzip -t dist/Son-Video-TV-v8.3.apk >/dev/null
-          unzip -l dist/Daughter-Video-TV-v8.3.apk | grep -q 'lib/armeabi-v7a/libxul.so'
-          unzip -l dist/Son-Video-TV-v8.3.apk | grep -q 'lib/armeabi-v7a/libxul.so'
-          if unzip -l dist/Daughter-Video-TV-v8.3.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Daughter TV APK'; exit 1; fi
-          if unzip -l dist/Son-Video-TV-v8.3.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Son TV APK'; exit 1; fi
+          cp kids-video-tv/app/build/outputs/apk/daughter/debug/app-daughter-debug.apk dist/Daughter-Video-v9-TV.apk
+          cp kids-video-tv/app/build/outputs/apk/son/debug/app-son-debug.apk dist/Son-Video-v9-TV.apk
+          test -s dist/Daughter-Video-v9-TV.apk
+          test -s dist/Son-Video-v9-TV.apk
+          unzip -t dist/Daughter-Video-v9-TV.apk >/dev/null
+          unzip -t dist/Son-Video-v9-TV.apk >/dev/null
+          unzip -l dist/Daughter-Video-v9-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          unzip -l dist/Son-Video-v9-TV.apk | grep -q 'lib/armeabi-v7a/libxul.so'
+          if unzip -l dist/Daughter-Video-v9-TV.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Daughter TV APK'; exit 1; fi
+          if unzip -l dist/Son-Video-v9-TV.apk | grep -q 'lib/arm64-v8a/'; then echo 'Unexpected arm64 library in Son TV APK'; exit 1; fi
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          keytool -printcert -jarfile dist/Daughter-Video-TV-v8.3.apk > dist/SIGNING-CERT-Daughter-TV.txt
-          keytool -printcert -jarfile dist/Son-Video-TV-v8.3.apk > dist/SIGNING-CERT-Son-TV.txt
-          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-TV-v8.3-Source.tar.gz -C kids-video-tv .
+          keytool -printcert -jarfile dist/Daughter-Video-v9-TV.apk > dist/SIGNING-CERT-Daughter-TV.txt
+          keytool -printcert -jarfile dist/Son-Video-v9-TV.apk > dist/SIGNING-CERT-Son-TV.txt
+          tar --exclude='./app/build' --exclude='./.gradle' -czf dist/Kids-Video-v9-TV-Source.tar.gz -C kids-video-tv .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kids-video-tv-v8.3-apks
+          name: kids-video-v9-tv
           path: dist/
           if-no-files-found: error
           retention-days: 30

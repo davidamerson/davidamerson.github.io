@@ -1,0 +1,37 @@
+name: Inspect TV v9 Source
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-tv-final" ]
+    paths: [ ".github/workflows/inspect-tv-v9-source.yml" ]
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Restore source and apply v9 + TV patches
+        run: |
+          set -euo pipefail
+          mkdir -p src
+          cat final-source-parts/*.b64 | tr -d '\n\r ' | base64 -d > /tmp/v8.tar.gz
+          tar -xzf /tmp/v8.tar.gz -C src
+          rm -f /tmp/v9.b64
+          for path in v9-phone-patch-small/00.b64 v9-phone-patch-safe/01-0.b64 v9-phone-patch-safe/01-1.b64 v9-phone-patch-safe/01-2.b64 v9-phone-patch-safe/01-3.b64 v9-phone-patch-small/02.b64 v9-phone-patch-safe/03-0.b64 v9-phone-patch-safe/03-1.b64 v9-phone-patch-safe/03-2.b64 v9-phone-patch-safe/03-3.b64; do
+            curl -fsSL "https://raw.githubusercontent.com/davidamerson/davidamerson.github.io/kids-video-final/${path}" >> /tmp/v9.b64
+          done
+          tr -d '\n\r ' < /tmp/v9.b64 | base64 -d | gzip -d > /tmp/v9.patch
+          (cd src && patch -p1 < /tmp/v9.patch)
+          cat v9-tv-patch-parts/*.b64 | tr -d '\n\r ' | base64 -d | gzip -d > /tmp/tv.patch
+          (cd src && patch -p1 < /tmp/tv.patch)
+      - name: Print relevant files
+        run: |
+          echo '===== BrowserPlaybackActivity.java ====='
+          cat src/app/src/main/java/com/kidsvideo/app/BrowserPlaybackActivity.java
+          echo '===== VideoAdapter.java ====='
+          cat src/app/src/main/java/com/kidsvideo/app/VideoAdapter.java
+          echo '===== MainActivity.java ====='
+          cat src/app/src/main/java/com/kidsvideo/app/MainActivity.java
+          echo '===== kidslock/content.js ====='
+          cat src/app/src/main/assets/kidslock/content.js
+          echo '===== build.gradle ====='
+          cat src/app/build.gradle

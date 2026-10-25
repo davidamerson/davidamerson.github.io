@@ -1,0 +1,30 @@
+name: Export Android Build Tools
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "kids-video-final" ]
+    paths:
+      - ".github/workflows/export-android-build-tools.yml"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Package latest Android build tools
+        run: |
+          set -euo pipefail
+          SDKROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          BT="$(find "$SDKROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -x "$BT/apksigner"
+          test -x "$BT/zipalign"
+          mkdir -p dist
+          tar -czf dist/android-build-tools-linux.tar.gz -C "$(dirname "$BT")" "$(basename "$BT")"
+          echo "$(basename "$BT")" > dist/BUILD-TOOLS-VERSION.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-build-tools-linux
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
